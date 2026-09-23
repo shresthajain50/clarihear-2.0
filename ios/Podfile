@@ -1,0 +1,50 @@
+# ClariHear 2.0 iOS Podfile
+# React Native New Architecture (Fabric + TurboModules) enabled
+
+require Pod::Executable.execute_command('node', ['-e', "
+  const path = require('path');
+  console.log(path.dirname(require.resolve('react-native/package.json')));
+"]).strip
+
+platform :ios, '15.0'
+prepare_react_native_project!
+
+# ── New Architecture: CRITICAL ───────────────────────────────────────────────
+# This single flag enables both Fabric (new renderer) and TurboModules (JSI).
+# Without this, our ClarihearJSI host object cannot be installed.
+ENV['RCT_NEW_ARCH_ENABLED'] = '1'
+
+target 'ClariHear' do
+  config = use_native_modules!
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    # Hermes is required for New Architecture JSI support
+    :hermes_enabled => true,
+    # Fabric renderer (new UI architecture)
+    :fabric_enabled => true,
+    # Enables TurboModules (synchronous JSI bridge)
+    :turbomodule_enabled => true,
+  )
+
+  # ── ClariHear DSP Native Module ───────────────────────────────────────────
+  # Local podspec: includes the shared C++ DSP engine + iOS CoreAudio wrapper
+  pod 'ClarihearDSP', :path => '../ios'
+
+  # ── Post-install: New Architecture activation ─────────────────────────────
+  post_install do |installer|
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+    )
+    # Ensure all pods target iOS 15.0
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+        # Enable C++17 for all pods that use C++ (critical for our DSP headers)
+        config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
+      end
+    end
+  end
+end

@@ -1,0 +1,90 @@
+# ── Node / React Native ───────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Metro bundler cache
+.metro-health-check*
+.metro-cache/
+
+# React Native build outputs
+*.jsbundle
+*.jsbundle.map
+
+# ── iOS ───────────────────────────────────────────────────────
+ios/build/
+ios/DerivedData/
+ios/Pods/
+ios/.xcode.env.local
+
+# Xcode user data
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
+# CocoaPods
+ios/Podfile.lock         # keep if you want reproducible builds; remove line to track it
+
+# ── Android ───────────────────────────────────────────────────
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/captures/
+android/.cxx/
+*.apk
+*.aab
+*.keystore
+!android/app/debug.keystore
+
+# Android Studio
+.idea/
+*.iml
+*.hprof
+
+# CMake / NDK build outputs
+android/app/src/main/cpp/**/*.o
+android/app/src/main/cpp/**/*.a
+
+# ── C++ ───────────────────────────────────────────────────────
+*.o
+*.a
+*.so
+*.dylib
+*.d
+
+# CMake build dirs
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# ── macOS ─────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+*.orig
+._*
+
+# ── Editor ────────────────────────────────────────────────────
+.vscode/settings.json
+.vscode/.history
+.idea/
+*.swp
+*.swo
+
+# ── Environment / secrets ─────────────────────────────────────
+.env
+.env.local
+.env.production
+google-services.json         # exclude if it contains API keys; add back if needed
+GoogleService-Info.plist     # same — exclude if it contains sensitive data
+
+# ── TypeScript ────────────────────────────────────────────────
+*.tsbuildinfo
+
+# ── Test artefacts ────────────────────────────────────────────
+coverage/
+/tmp/dsp_test*
