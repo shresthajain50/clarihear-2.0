@@ -1,51 +1,45 @@
-# ClariHear 2.0 iOS Podfile
-# React Native New Architecture (Fabric + TurboModules) enabled
+# Resolve react_native_pods.rb with node to allow for hoisting
+require Pod::Executable.execute_command('node', ['-p',
+  'require.resolve(
+    "react-native/scripts/react_native_pods.rb",
+    {paths: [process.argv[1]]},
+  )', __dir__]).strip
 
-require Pod::Executable.execute_command('node', ['-e', "
-  const path = require('path');
-  console.log(path.dirname(require.resolve('react-native/package.json')));
-]).strip + '/scripts/react_native_pods.rb'
-require Pod::Executable.execute_command('node', ['-e',
-  'console.log(require("path").dirname(require.resolve("@react-native-community/cli-platform-ios/package.json")));'
-]).strip + '/native_modules.rb'
-
-platform :ios, '15.0'
+platform :ios, min_ios_version_supported
 prepare_react_native_project!
 
-# ── New Architecture: CRITICAL ───────────────────────────────────────────────
-# This single flag enables both Fabric (new renderer) and TurboModules (JSI).
-# Without this, our ClarihearJSI host object cannot be installed.
 ENV['RCT_NEW_ARCH_ENABLED'] = '1'
+
+linkage = ENV['USE_FRAMEWORKS']
+if linkage != nil
+  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
+  use_frameworks! :linkage => linkage.to_sym
+end
 
 target 'ClariHear' do
   config = use_native_modules!
 
   use_react_native!(
     :path => config[:reactNativePath],
-    # Hermes is required for New Architecture JSI support
-    :hermes_enabled => true,
-    # Fabric renderer (new UI architecture)
-    :fabric_enabled => true,
-    # Enables TurboModules (synchronous JSI bridge)
-    :turbomodule_enabled => true,
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
 
   # ── ClariHear DSP Native Module ───────────────────────────────────────────
-  # Local podspec: includes the shared C++ DSP engine + iOS CoreAudio wrapper
   pod 'ClarihearDSP', :path => '../ios'
 
-  # ── Post-install: New Architecture activation ─────────────────────────────
   post_install do |installer|
+    # https://github.com/facebook/react-native/blob/main/packages/react-native/scripts/react_native_pods.rb#L197-L202
     react_native_post_install(
       installer,
       config[:reactNativePath],
       :mac_catalyst_enabled => false,
+      # :ccache_enabled => true
     )
-    # Ensure all pods target iOS 15.0
+    # Ensure all pods target iOS 15.0 and C++17
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |config|
         config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
-        # Enable C++17 for all pods that use C++ (critical for our DSP headers)
         config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
       end
     end
