@@ -13,7 +13,7 @@ Pod::Spec.new do |s|
   s.license          = { :type => 'MIT', :file => 'LICENSE' }
   s.author           = { 'ClariHear' => 'dev@clarihear.app' }
   s.platform         = :ios, '15.0'
-
+  s.source           = { :path => '.' }
   # ── Source files ───────────────────────────────────────────────────────────
   # Shared C++ DSP core (platform-independent)
   s.source_files = [
