@@ -18,7 +18,7 @@ Pod::Spec.new do |s|
   # Shared C++ DSP core (platform-independent)
   s.source_files = [
     '../cpp/**/*.{h,cpp}',        # Shared DSP headers + implementations
-    'ios/**/*.{h,m,mm,cpp}',      # iOS-specific: CoreAudio wrapper + JSI bindings
+    '*.{h,m,mm,cpp}',             # iOS-specific: CoreAudio wrapper + JSI bindings
   ]
 
   # ── Compiler settings ──────────────────────────────────────────────────────
