@@ -4,7 +4,7 @@
 // ============================================================
 
 #import "AppDelegate.h"
-#import "ClarihearJSI.h"
+#import <ClarihearDSP/ClarihearJSI.h>
 
 #import <React/RCTBundleURLProvider.h>
 #import <React/RCTBridge.h>
