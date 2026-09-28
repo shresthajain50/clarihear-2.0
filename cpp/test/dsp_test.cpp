@@ -1,80 +1,20 @@
 // ============================================================
-//  dsp_test.cpp  —  ClariHear DSP Unit Tests
-//  Compile and run WITHOUT React Native / iOS / Android:
-//
-//    cd "/Users/shresthajain/clarihear 2.0"
-//    clang++ -std=c++17 -O2 -I cpp \
-//        cpp/BiquadFilter.cpp cpp/Compressor.cpp cpp/AudioEngine.cpp \
-//        cpp/test/dsp_test.cpp -o dsp_test && ./dsp_test
-//
-//  Expected output:
-//    [PASS] BiquadFilter: 1kHz peak filter unity gain at DC
-//    [PASS] BiquadFilter: 1kHz peak filter boosts at centre freq
-//    [PASS] Compressor: below threshold → unity gain
-//    [PASS] Compressor: above threshold → gain reduction
-//    [PASS] AudioEngine: process() runs without crash
-//    [PASS] AudioEngine: silence in → silence out
-//    [PASS] AudioEngine: no sample exceeds ±1.0 (hard clip safety)
-//    All 7 tests passed.
+//  dsp_test.cpp  —  ClariHear DSP unit + golden-fixture tests
+//  Build & run headlessly (no React Native / iOS / Android):
+//    cmake -S cpp -B build/cpp && cmake --build build/cpp && ctest --test-dir build/cpp --output-on-failure
+//  Regenerate golden fixtures after an intentional DSP change:
+//    CLARIHEAR_UPDATE_GOLDEN=1 ./build/cpp/dsp_test
 // ============================================================
-
 #include "AudioEngine.h"
 #include "BiquadFilter.h"
 #include "Compressor.h"
-
-#include <cmath>
-#include <cstdio>
-#include <cassert>
-#include <array>
-#include <numeric>
+#include "test_util.h"
 
 using namespace clarihear;
+using namespace testutil;
 
-// ── Test harness ─────────────────────────────────────────────
-static int gPassed = 0;
-static int gFailed = 0;
-
-#define EXPECT_NEAR(val, expected, tol, name)              \
-    do {                                                    \
-        float _v = (val), _e = (expected);                 \
-        if (std::abs(_v - _e) <= (tol)) {                  \
-            printf("[PASS] %s  (got %.4f)\n", name, _v);   \
-            ++gPassed;                                      \
-        } else {                                            \
-            printf("[FAIL] %s  expected %.4f ±%.4f, got %.4f\n", \
-                   name, _e, (float)(tol), _v);            \
-            ++gFailed;                                      \
-        }                                                   \
-    } while(0)
-
-#define EXPECT_TRUE(cond, name)                            \
-    do {                                                    \
-        if (cond) {                                         \
-            printf("[PASS] %s\n", name);                   \
-            ++gPassed;                                      \
-        } else {                                            \
-            printf("[FAIL] %s\n", name);                   \
-            ++gFailed;                                      \
-        }                                                   \
-    } while(0)
-
-// ── Helpers ───────────────────────────────────────────────────
-
-/// Generate numSamples of a sine wave at freq Hz, sample rate 48kHz.
-static std::vector<float> makeSine(float freq, int numSamples,
-                                    float amplitude = 0.5f) {
-    std::vector<float> buf(numSamples);
-    for (int i = 0; i < numSamples; ++i)
-        buf[i] = amplitude * std::sin(2.f * M_PI * freq * i / 48000.f);
-    return buf;
-}
-
-/// Measure RMS of a buffer.
-static float rms(const std::vector<float>& buf) {
-    float sum = 0.f;
-    for (float x : buf) sum += x * x;
-    return std::sqrt(sum / static_cast<float>(buf.size()));
-}
+static std::vector<float> makeSine(float freq, int n, float amp = 0.5f) { return sine(freq, n, amp); }
+static float rms(const std::vector<float>& b) { return testutil::rms(b.data(), b.size()); }
 
 // ── Test: BiquadFilter ────────────────────────────────────────
 
@@ -112,6 +52,16 @@ void test_biquad_peak_centre() {
 
     // Should be close to +20 dB
     EXPECT_NEAR(gainDb, 20.f, 1.5f, "BiquadFilter: 1kHz peak filter boosts at centre freq");
+}
+
+void test_biquad_golden_noise() {
+    // Golden: +12 dB peak @ 2 kHz on 0.5 s of fixed-seed noise must match the fixture.
+    BiquadFilter flt;
+    flt.setCoeffs(makeBiquadCoeffs(BiquadType::Peak, kSr, 2000.f, 0.7f, 12.f));
+    auto in = noise(24000, 0.1f);
+    for (float& x : in) x = flt.process(x);
+    EXPECT_TRUE(matchesGolden("biquad_peak2k_12db_noise", stereo(in)),
+                "BiquadFilter: golden fixture (peak 2 kHz +12 dB on noise)");
 }
 
 // ── Test: Compressor ──────────────────────────────────────────
@@ -220,6 +170,7 @@ int main() {
 
     test_biquad_peak_dc();
     test_biquad_peak_centre();
+    test_biquad_golden_noise();
     test_compressor_below_threshold();
     test_compressor_above_threshold();
     test_engine_no_crash();

@@ -59,7 +59,7 @@ public:
     void setCoeffs(const BiquadCoeffs& c) noexcept { _current = c; }
 
     /// Reset delay-line state to zero (coefficients unchanged).
-    void reset() noexcept { std::memset(&_state, 0, sizeof(_state)); }
+    void reset() noexcept { _state = {}; }
 
     /// Process one sample — called from the real-time audio thread.
     /// Direct Form II Transposed: one multiply-accumulate per tap.

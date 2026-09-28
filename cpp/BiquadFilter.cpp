@@ -74,13 +74,8 @@ BiquadCoeffs makeBiquadCoeffs(BiquadType type,
     // Boosts/cuts all frequencies below freq by gainDb.
     // Used for the 250 Hz and 500 Hz audiogram bands.
     case BiquadType::LowShelf: {
-        const float cosP1  = cosW0 + 1.f;
-        const float cosM1  = cosW0 - 1.f;
-        const float beta   = sqrtA / Q;          // shelf slope term
+        const float beta   = sqrtA / Q;          // shelf slope term (= 2·sqrt(A)·alpha)
         const float betaSin = beta * sinW0;
-
-        c.b0 =        A * ((A + 1.f) - cosM1 * A + betaSin);   // actually:
-        // Full low-shelf from EQ Cookbook:
         c.b0 =  A * ( (A+1.f) - (A-1.f)*cosW0 + betaSin );
         c.b1 =  2.f*A*( (A-1.f) - (A+1.f)*cosW0 );
         c.b2 =  A * ( (A+1.f) - (A-1.f)*cosW0 - betaSin );
