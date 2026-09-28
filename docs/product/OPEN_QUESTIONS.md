@@ -273,3 +273,22 @@ doesn't fail the check.
 
 **Needs:** per-device measurement (bench, PRD §47 Stage 2) relating dBFS to
 dB(A), and the DIN protocol's own ambient limit once stimuli are chosen (Q6).
+
+---
+
+## Q11 — Feedback-loop step sizes and priorities (ticket #22)
+
+**Context:** PRD §21 and §28 call for small, bounded changes driven by 1–5
+clarity/comfort/background/effort ratings, with no numbers given.
+
+**Default** (`src/hearing/feedback.ts`, `clarihear-feedback-0.1.0`): one step
+of 0.25 on the −1…+1 control scale per check-in, and a rating ≤ 2 counts as a
+problem. **Discomfort wins**: it lowers loudness, plus clarity and background
+if they're above neutral, and never raises anything. Otherwise, unclear speech
+gives clarity +0.25 and too much background gives background −0.25. Feedback
+**never raises loudness**, since volume is the user's own control. Effort is
+recorded but not acted on. The results stay within the ±6 dB user-offset bound
+(Q9).
+
+**Needs:** UX/audiologist review, and the check-in UI (the PRD §28 60-second
+exercise), which isn't built yet.
