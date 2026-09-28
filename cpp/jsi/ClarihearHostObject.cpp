@@ -224,7 +224,7 @@ Val ClarihearHostObject::get(RT& rt, const Prop& name) {
                     right[i] = rv.isNumber() ? static_cast<float>(rv.asNumber()) : 0.f;
                 }
 
-                _engine->applyAudiogram(left, right);
+                _engine->setBandGains(left, right);  // fitted dB gain; engine clamps
                 return Val::undefined();
             });
     }

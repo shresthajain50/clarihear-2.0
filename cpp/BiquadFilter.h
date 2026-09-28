@@ -46,17 +46,29 @@ float biquadMagnitudeDb(const BiquadCoeffs& c, float sampleRate, float freq) noe
 
 /// ===========================================================
 ///  BiquadFilter — single biquad section, mono processing
-///  NOT thread-safe: setCoeffs() and process() must be called from
-///  the same thread (the audio thread). AudioEngine computes new
-///  coefficients on the audio thread from its lock-free parameter
-///  mailbox, so no cross-thread handoff happens here.
+///  NOT thread-safe: setCoeffs()/rampTo() and process() must be called
+///  from the same thread (the audio thread). AudioEngine computes
+///  coefficients on the writer side and hands them over through its
+///  lock-free parameter mailbox.
 /// ===========================================================
 class BiquadFilter {
 public:
     BiquadFilter() noexcept { reset(); }
 
-    /// Set coefficients. Filter state is kept so changes don't click.
-    void setCoeffs(const BiquadCoeffs& c) noexcept { _current = c; }
+    /// Set coefficients immediately (no glide). Filter state is kept.
+    void setCoeffs(const BiquadCoeffs& c) noexcept { _current = c; _rampLeft = 0; }
+
+    /// Glide linearly to `t` over `samples` samples so gain changes don't click.
+    /// Stable by construction: the 2nd-order stability region in (a1, a2) is a
+    /// convex triangle, so every point between two stable filters is stable.
+    void rampTo(const BiquadCoeffs& t, int samples) noexcept {
+        if (samples <= 0) { setCoeffs(t); return; }
+        const float k = 1.f / float(samples);
+        _delta = {(t.b0 - _current.b0) * k, (t.b1 - _current.b1) * k, (t.b2 - _current.b2) * k,
+                  (t.a1 - _current.a1) * k, (t.a2 - _current.a2) * k};
+        _target = t;
+        _rampLeft = samples;
+    }
 
     /// Reset delay-line state to zero (coefficients unchanged).
     void reset() noexcept { _state = {}; }
@@ -64,6 +76,14 @@ public:
     /// Process one sample — called from the real-time audio thread.
     /// Direct Form II Transposed: one multiply-accumulate per tap.
     inline float process(float x) noexcept {
+        if (_rampLeft > 0) {
+            if (--_rampLeft == 0) {
+                _current = _target;
+            } else {
+                _current.b0 += _delta.b0; _current.b1 += _delta.b1; _current.b2 += _delta.b2;
+                _current.a1 += _delta.a1; _current.a2 += _delta.a2;
+            }
+        }
         float y = _current.b0 * x + _state.w1;
         _state.w1 = _current.b1 * x - _current.a1 * y + _state.w2;
         _state.w2 = _current.b2 * x - _current.a2 * y;
@@ -73,6 +93,9 @@ public:
 private:
     struct State { float w1 = 0.f, w2 = 0.f; } _state;
     BiquadCoeffs _current{1.f, 0.f, 0.f, 0.f, 0.f};  // passthrough until configured
+    BiquadCoeffs _target{1.f, 0.f, 0.f, 0.f, 0.f};
+    BiquadCoeffs _delta{0.f, 0.f, 0.f, 0.f, 0.f};
+    int _rampLeft = 0;
 };
 
 } // namespace clarihear

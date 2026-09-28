@@ -84,7 +84,10 @@ JNI_FUNC(nativeSetEqBandGain)(JNIEnv* /*env*/, jobject /*thiz*/,
 JNI_FUNC(nativeApplyAudiogram)(JNIEnv* env, jobject /*thiz*/,
                                 jfloatArray leftGains,
                                 jfloatArray rightGains) -> void {
-    if (!gPlayer) return;
+    if (!gPlayer || !leftGains || !rightGains) return;
+    // Trust boundary: the engine reads exactly kEqBands floats per ear.
+    if (env->GetArrayLength(leftGains) != clarihear::kEqBands ||
+        env->GetArrayLength(rightGains) != clarihear::kEqBands) return;
 
     // Get raw pointers to the Java float arrays (GetFloatArrayElements
     // is safe here — we're on the Kotlin/JVM thread, not the audio thread)
@@ -92,7 +95,8 @@ JNI_FUNC(nativeApplyAudiogram)(JNIEnv* env, jobject /*thiz*/,
     jfloat* right = env->GetFloatArrayElements(rightGains, nullptr);
 
     if (left && right) {
-        gPlayer->dspEngine().applyAudiogram(
+        // Fitted gains (dB gain), never dB HL; the engine clamps again.
+        gPlayer->dspEngine().setBandGains(
             reinterpret_cast<const float*>(left),
             reinterpret_cast<const float*>(right));
     }

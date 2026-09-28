@@ -39,6 +39,8 @@ public:
             _gain = needed;                                          // instant attack
         } else {
             _gain = needed + _releaseCoeff * (_gain - needed);       // smooth release
+            // Float release toward 1 stalls at 1-ulp; snap so an idle limiter is bit-transparent.
+            if (_gain > 0.99999f && needed == 1.f) _gain = 1.f;
         }
         l *= _gain;
         r *= _gain;

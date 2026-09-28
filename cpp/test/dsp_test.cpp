@@ -5,7 +5,6 @@
 //  Regenerate golden fixtures after an intentional DSP change:
 //    CLARIHEAR_UPDATE_GOLDEN=1 ./build/cpp/dsp_test
 // ============================================================
-#include "AudioEngine.h"
 #include "BiquadFilter.h"
 #include "Compressor.h"
 #include "test_util.h"
@@ -122,48 +121,6 @@ void test_compressor_above_threshold() {
     EXPECT_NEAR(gainDb, -18.f, 3.f, "Compressor: above threshold → gain reduction");
 }
 
-// ── Test: AudioEngine ─────────────────────────────────────────
-
-void test_engine_no_crash() {
-    AudioEngine eng;
-    const int kFrames = 256;
-    float input[kFrames * 2]  = {};
-    float output[kFrames * 2] = {};
-
-    // Should not crash or throw
-    eng.process(input, output, kFrames);
-    EXPECT_TRUE(true, "AudioEngine: process() runs without crash");
-}
-
-void test_engine_silence_in_silence_out() {
-    AudioEngine eng;
-    const int kFrames = 1024;
-    float input[kFrames * 2]  = {};  // silence
-    float output[kFrames * 2] = {};
-    eng.process(input, output, kFrames);
-
-    float peak = 0.f;
-    for (int i = 0; i < kFrames * 2; ++i)
-        if (std::abs(output[i]) > peak) peak = std::abs(output[i]);
-
-    EXPECT_NEAR(peak, 0.f, 0.0001f, "AudioEngine: silence in → silence out");
-}
-
-void test_engine_hard_clip() {
-    // Feed a massive signal and verify hard clip safety limiter works
-    AudioEngine eng;
-    const int kFrames = 4096;
-    std::vector<float> input(kFrames * 2, 100.f);   // +40 dBFS: should be clipped
-    std::vector<float> output(kFrames * 2, 0.f);
-
-    eng.process(input.data(), output.data(), kFrames);
-
-    float peak = 0.f;
-    for (float x : output) if (std::abs(x) > peak) peak = std::abs(x);
-
-    EXPECT_TRUE(peak <= 1.0f, "AudioEngine: no sample exceeds ±1.0 (hard clip safety)");
-}
-
 // ── main ──────────────────────────────────────────────────────
 int main() {
     printf("=== ClariHear DSP Unit Tests ===\n\n");
@@ -173,9 +130,6 @@ int main() {
     test_biquad_golden_noise();
     test_compressor_below_threshold();
     test_compressor_above_threshold();
-    test_engine_no_crash();
-    test_engine_silence_in_silence_out();
-    test_engine_hard_clip();
 
     printf("\n%d passed, %d failed.\n", gPassed, gFailed);
     return gFailed > 0 ? 1 : 0;

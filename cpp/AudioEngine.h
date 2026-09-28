@@ -1,149 +1,157 @@
 #pragma once
 // ============================================================
 //  AudioEngine.h  —  ClariHear DSP Core
-//  Top-level DSP pipeline. Owns all processing stages and
-//  exposes the single entry-point called by the platform audio
-//  callbacks (Oboe on Android, RemoteIO/AVAudioEngine on iOS).
+//  Platform-independent stereo pipeline, called from the platform
+//  audio callbacks (Oboe on Android, AVAudioEngine tap on iOS).
 //
-//  Pipeline (per channel):
-//    mic input
-//      → FeedbackSuppressor  (AFC: remove acoustic loopback)
-//      → BiquadFilter[6]     (6-band audiogram-driven EQ)
-//      → Compressor          (WDRC: amplify quiet, limit loud)
-//      → output buffer
+//  Chain per ear (ENGINEERING_SKILL "DSP order", PRD §19):
+//    input sanitize (non-finite → 0)          ← safety/input gate
+//      → FeedbackSuppressor  (prototype, OFF unless developer mode)
+//      → high-pass 100 Hz    (rumble/DC)
+//      → 6-band EQ           (fitted gains from src/hearing/fitting.ts)
+//      → gentle WDRC         (placeholder params, clamped)
+//      → volume              (0..1, ramped)
+//    → bypass crossfade (raw input) → mute ramp
+//    → Level-1 stereo peak limiter (-1 dBFS) → output
+//  Level 2 (gain ceiling) is enforced on the writer side before any
+//  coefficients reach the audio thread. Level 3 (acoustic SPL) needs a
+//  calibrated transducer and is NOT provided (PRD §23).
 //
-//  Audio format: 48000 Hz, Float32, interleaved stereo (L/R)
+//  Threading (PRD §50):
+//    • process() runs ONLY on the real-time audio thread. It never
+//      allocates, locks, logs, does I/O, throws, or calls JS.
+//    • setXxx() may be called from any non-audio thread. Setters serialise
+//      among themselves with a writer-side mutex, precompute everything,
+//      and publish through a wait-free triple buffer. Mute/bypass are
+//      plain atomics so they take effect on the very next callback.
 //
-//  Thread safety:
-//    • process() is called ONLY from the real-time audio thread.
-//    • All setXxx() methods are safe to call from ANY thread
-//      (JSI thread, UI thread) because they only write to
-//      atomic/pending-value fields that process() reads once
-//      per call, with no locks.
+//  Audio format: 48000 Hz, Float32, interleaved stereo (L/R).
 // ============================================================
 
 #include "BiquadFilter.h"
 #include "Compressor.h"
 #include "FeedbackSuppressor.h"
+#include "GainConstraints.h"
+#include "Limiter.h"
 
-#include <array>
-#include <cstdint>
 #include <atomic>
+#include <cstdint>
+#include <mutex>
 
 namespace clarihear {
 
-/// Number of EQ bands matching clinical audiogram frequencies:
-/// 250, 500, 1000, 2000, 4000, 8000 Hz
+/// EQ bands at the audiogram frequencies 250, 500, 1k, 2k, 4k, 8k Hz.
 static constexpr int kEqBands = 6;
+static constexpr float kEqFrequencies[kEqBands] = {250.f, 500.f, 1000.f, 2000.f, 4000.f, 8000.f};
+static constexpr float kEqQ = 0.7f;
+static constexpr float kHighPassHz = 100.f;
 
-/// Audiogram EQ band frequencies (Hz) — matches iOS AudioEngineManager
-static constexpr float kEqFrequencies[kEqBands] = {250.f, 500.f, 1000.f,
-                                                     2000.f, 4000.f, 8000.f};
+/// Everything the audio thread needs, precomputed on the writer side.
+struct RtParams {
+    BiquadCoeffs eqL[kEqBands]{};
+    BiquadCoeffs eqR[kEqBands]{};
+    CompressorParams comp{};
+    float volume = 1.f;
+};
 
-// ============================================================
-//  ChannelEngine  — per-ear (L or R) processing chain
-// ============================================================
-struct ChannelEngine {
-    FeedbackSuppressor  afc;
-    BiquadFilter        eq[kEqBands];
-    Compressor          comp;
-    float               masterGainLinear = 1.f;
-
-    explicit ChannelEngine(float sr)
-        : afc(sr), comp(sr) {}
-
-    /// Update a single EQ band gain (called via JSI from UI).
-    /// bandIndex: 0–5, gainDb: dB gain to apply (typically 0–40 dB)
-    void setEqBandGain(int bandIndex, float gainDb, float sampleRate) noexcept {
-        if (bandIndex < 0 || bandIndex >= kEqBands) return;
-        BiquadCoeffs c = makeBiquadCoeffs(BiquadType::Peak,
-                                           sampleRate,
-                                           kEqFrequencies[bandIndex],
-                                           /*Q=*/0.7f,
-                                           gainDb);
-        eq[bandIndex].setCoeffs(c);
+/// Single-producer / single-consumer triple buffer. write() and read() are wait-free.
+template <class T>
+class TripleBuffer {
+public:
+    void write(const T& v) noexcept {  // producer only
+        _buf[_back] = v;
+        _back = _mid.exchange(_back | kDirty, std::memory_order_acq_rel) & kIdx;
+    }
+    bool read(T& out) noexcept {  // consumer only
+        if (!(_mid.load(std::memory_order_acquire) & kDirty)) return false;
+        _front = _mid.exchange(_front, std::memory_order_acq_rel) & kIdx;
+        out = _buf[_front];
+        return true;
     }
 
-    /// Process a single Float32 sample through the full chain.
+private:
+    static_assert(std::atomic<int>::is_always_lock_free, "mailbox must be lock-free");
+    static constexpr int kIdx = 3, kDirty = 4;
+    T _buf[3]{};
+    std::atomic<int> _mid{1};
+    int _front = 0, _back = 2;
+};
+
+/// Per-ear processing chain. Audio thread only.
+struct ChannelEngine {
+    FeedbackSuppressor afc;
+    BiquadFilter hpf;
+    BiquadFilter eq[kEqBands];
+    Compressor comp;
+
+    explicit ChannelEngine(float sr) noexcept : afc(sr), comp(sr) {}
+
     inline float process(float x) noexcept {
         x = afc.process(x);
-        for (int i = 0; i < kEqBands; ++i) x = eq[i].process(x);
-        x = comp.process(x);
-        return x * masterGainLinear;
+        x = hpf.process(x);
+        for (auto& f : eq) x = f.process(x);
+        return comp.process(x);
     }
 };
 
-// ============================================================
-//  AudioEngine  — stereo pipeline, platform-independent
-// ============================================================
 class AudioEngine {
 public:
     static constexpr float kSampleRate = 48000.f;
 
-    AudioEngine();
-    ~AudioEngine() = default;
-
-    // Prevent copy/move (singleton-style ownership)
-    AudioEngine(const AudioEngine&)            = delete;
+    AudioEngine() noexcept;
+    AudioEngine(const AudioEngine&) = delete;
     AudioEngine& operator=(const AudioEngine&) = delete;
 
-    // ─── JSI-callable API (any thread) ─────────────────────
-
-    /// Set master volume [0.0 .. 1.0]
+    // ─── Control API (any NON-audio thread) ─────────────────
+    /// Output volume, linear [0, 1]. Only ever attenuates. Non-finite → 0.
     void setMasterVolume(float linear) noexcept;
-
-    /// Set EQ band gain for left and/or right channel.
-    /// gainDb is the audiogram threshold converted to a compensation gain.
-    void setEqBandGain(int band, float gainDbLeft, float gainDbRight) noexcept;
-
-    /// Apply a full audiogram in one call (called after hearing test).
-    /// leftGains / rightGains: arrays of kEqBands floats (dB compensation)
-    void applyAudiogram(const float* leftGains,
-                        const float* rightGains) noexcept;
-
-    /// Configure compressor parameters for one or both channels.
+    /// Fitted per-band gains in dB GAIN (never dB HL), kEqBands each; null = leave that ear.
+    /// Clamped per band, then scaled so the combined response stays under Level 2.
+    void setBandGains(const float* leftDb, const float* rightDb) noexcept;
+    /// Developer mode only: one band, same clamping.
+    void setEqBandGain(int band, float leftDb, float rightDb) noexcept;
+    /// Developer mode only: every field clamped to a gentle range.
     void setCompressorParams(const CompressorParams& params) noexcept;
-
-    /// Enable / disable feedback suppression.
+    /// Developer mode only: prototype, not feedback cancellation (PRD §24).
     void setFeedbackSuppression(bool enabled) noexcept;
-
-    /// Set AFC delay in milliseconds.
     void setAfcDelayMs(float ms) noexcept;
+    /// Unprocessed passthrough (still limited). 10 ms crossfade.
+    void setBypass(bool on) noexcept { _bypass.store(on, std::memory_order_relaxed); }
+    /// Silence. Wins over everything. 2 ms ramp.
+    void setMuted(bool on) noexcept { _muted.store(on, std::memory_order_relaxed); }
 
-    // ─── Real-time audio callback ───────────────────────────
+    // ─── Real-time callback ─────────────────────────────────
+    /// Interleaved stereo in → out, numFrames frames. in and out may alias.
+    void process(const float* input, float* output, int numFrames) noexcept;
 
-    /// Process one buffer of interleaved stereo Float32 audio.
-    /// inputData:  pointer to [numFrames * 2] Float32 samples (L0,R0,L1,R1,…)
-    /// outputData: pointer to same layout — may alias inputData (in-place OK)
-    /// numFrames:  number of sample frames in this callback
-    ///
-    /// Called from the real-time audio thread. Must complete in
-    /// < (numFrames / sampleRate) seconds. No alloc, no I/O, no locks.
-    void process(const float* __restrict__ inputData,
-                       float* __restrict__ outputData,
-                 int numFrames) noexcept;
-
-    // ─── Metering (read from UI thread) ────────────────────
-
-    float inputLevelDb()  const noexcept { return _inputLevelDb.load(std::memory_order_relaxed); }
+    // ─── Metering (any thread) ──────────────────────────────
+    float inputLevelDb() const noexcept { return _inputLevelDb.load(std::memory_order_relaxed); }
     float outputLevelDb() const noexcept { return _outputLevelDb.load(std::memory_order_relaxed); }
+    /// Samples where the Level-1 limiter reduced gain (drives the PRD §52 message).
+    uint32_t limiterEngagedCount() const noexcept { return _limiterEngaged.load(std::memory_order_relaxed); }
 
 private:
-    ChannelEngine _left;
-    ChannelEngine _right;
+    void publishLocked() noexcept;  // caller holds _writeMutex
+    void applyRt(bool ramp) noexcept;
 
-    std::atomic<float> _inputLevelDb{-96.f};
-    std::atomic<float> _outputLevelDb{-96.f};
+    // Writer side (guarded by _writeMutex; never touched by process()).
+    std::mutex _writeMutex;
+    float _gainL[kEqBands]{}, _gainR[kEqBands]{};
+    CompressorParams _comp{};
+    float _volumeReq = 1.f;
+    TripleBuffer<RtParams> _mailbox;
 
-    float _masterGainLinear = 1.f;
+    // Audio-thread state.
+    ChannelEngine _left, _right;
+    PeakLimiter _limiter;
+    RtParams _rt;
+    float _volume = 1.f, _volumeTarget = 1.f, _volumeStep = 0.f;
+    int _volumeRampLeft = 0;
+    float _muteGain = 1.f, _bypassMix = 0.f;
 
-    /// Convert dBFS to linear, with floor at -96 dBFS.
-    static float dbToLinear(float db) noexcept {
-        return (db <= -96.f) ? 0.f : std::pow(10.f, db / 20.f);
-    }
-    static float linearToDb(float lin) noexcept {
-        return (lin < 1e-10f) ? -96.f : 20.f * std::log10(lin);
-    }
+    std::atomic<bool> _muted{false}, _bypass{false};
+    std::atomic<float> _inputLevelDb{-96.f}, _outputLevelDb{-96.f};
+    std::atomic<uint32_t> _limiterEngaged{0};
 };
 
 } // namespace clarihear

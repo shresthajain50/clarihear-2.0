@@ -44,17 +44,15 @@ RCT_EXPORT_METHOD(isRunning:(RCTPromiseResolveBlock)resolve
 RCT_EXPORT_METHOD(setEqBandGain:(int)band
                   gainLeft:(float)gainL
                   gainRight:(float)gainR) {
-    [[CoreAudioPlayer shared].dspEngine setEqBandGain:band
-                                          gainDbLeft:gainL
-                                         gainDbRight:gainR];
+    [CoreAudioPlayer shared].dspEngine->setEqBandGain(band, gainL, gainR);
 }
 
 RCT_EXPORT_METHOD(setMasterVolume:(float)linear) {
-    [[CoreAudioPlayer shared].dspEngine setMasterVolume:linear];
+    [CoreAudioPlayer shared].dspEngine->setMasterVolume(linear);
 }
 
 RCT_EXPORT_METHOD(setFeedbackSuppression:(BOOL)enabled) {
-    [[CoreAudioPlayer shared].dspEngine setFeedbackSuppression:enabled];
+    [CoreAudioPlayer shared].dspEngine->setFeedbackSuppression(enabled);
 }
 
 RCT_EXPORT_METHOD(applyAudiogram:(NSArray<NSNumber*>*)leftGains
@@ -66,7 +64,8 @@ RCT_EXPORT_METHOD(applyAudiogram:(NSArray<NSNumber*>*)leftGains
         l[i] = leftGains[i].floatValue;
         r[i] = rightGains[i].floatValue;
     }
-    [[CoreAudioPlayer shared].dspEngine applyAudiogram:l rightGains:r];
+    // Fitted gains (dB gain) from src/hearing/fitting.ts, never dB HL; the engine clamps again.
+    [CoreAudioPlayer shared].dspEngine->setBandGains(l, r);
 }
 
 // ── Metering ──────────────────────────────────────────────────

@@ -30,3 +30,9 @@ target_link_libraries(dsp_test PRIVATE clarihear_dsp)
 target_compile_definitions(dsp_test PRIVATE
   CLARIHEAR_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures")
 add_test(NAME dsp_test COMMAND dsp_test)
+
+add_executable(engine_test test/engine_test.cpp)
+target_link_libraries(engine_test PRIVATE clarihear_dsp ${CMAKE_DL_LIBS})
+target_compile_definitions(engine_test PRIVATE
+  CLARIHEAR_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures")
+add_test(NAME engine_test COMMAND engine_test)

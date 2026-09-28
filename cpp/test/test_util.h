@@ -31,9 +31,11 @@ namespace testutil {
 
 constexpr float kSr = 48000.f;
 
-inline std::vector<float> sine(float freq, int n, float amp = 0.5f) {
+/// `phase` in radians. Use π/2 when a test changes a parameter at sample 0, so the
+/// change lands on a signal peak instead of a zero crossing (where a jump is invisible).
+inline std::vector<float> sine(float freq, int n, float amp = 0.5f, float phase = 0.f) {
     std::vector<float> b(n);
-    for (int i = 0; i < n; ++i) b[i] = amp * std::sin(2.f * float(M_PI) * freq * i / kSr);
+    for (int i = 0; i < n; ++i) b[i] = amp * std::sin(2.f * float(M_PI) * freq * i / kSr + phase);
     return b;
 }
 

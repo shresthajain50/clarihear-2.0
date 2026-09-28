@@ -1,187 +1,201 @@
 // ============================================================
-//  AudioEngine.cpp  —  ClariHear DSP Core
-//  Top-level stereo processing pipeline implementation.
-//
-//  This is the only file called from the platform audio callbacks:
-//    • iOS:     CoreAudioPlayer.mm → installTap block
-//    • Android: OboeAudioPlayer.cpp → onAudioReady()
-//
-//  Thread model:
-//    • process()     → called ONLY from the real-time audio thread
-//    • setXxx()      → called from ANY thread (JSI, UI, test)
-//    • Atomics used  → for metering values read by the UI thread
-//    • Pending-value pattern used → for parameter updates
-//      (write to _pending on any thread, read in process() with no lock)
+//  AudioEngine.cpp  —  ClariHear DSP Core (see AudioEngine.h for the chain + threading)
 // ============================================================
 
 #include "AudioEngine.h"
-#include <cmath>
-#include <cstring>
+
 #include <algorithm>
+#include <cmath>
 
 namespace clarihear {
 
-// ── AudioEngine constructor ──────────────────────────────────
-// Initialises both stereo channels with the correct sample rate.
-// Note: ChannelEngine constructor is defined inline in AudioEngine.h.
-// ──────────────────────────────────────────────────────────────
-AudioEngine::AudioEngine()
-    : _left(kSampleRate), _right(kSampleRate) {
+namespace {
 
-    // Default compressor: clinical WDRC profile for hearing aids.
-    // These match what the existing iOS app uses via AVAudioUnitDynamicsProcessor.
-    CompressorParams defaults;
-    defaults.thresholdDb  = -40.f;   // start compressing at -40 dBFS
-    defaults.ratio        =  4.f;    // 4:1 — moderate compression
-    defaults.kneeDb       =  6.f;    // smooth knee for natural sound
-    defaults.attackMs     =  5.f;    // 5ms — fast enough to catch consonants
-    defaults.releaseMs    = 100.f;   // 100ms — natural gain recovery
-    defaults.makeupGainDb = 20.f;    // +20 dB makeup: amplify quiet sounds
+constexpr int kParamRampSamples  = 480;  // 10 ms: EQ + volume glide
+constexpr int kBypassRampSamples = 480;  // 10 ms crossfade
+constexpr int kMuteRampSamples   = 96;   //  2 ms: "immediate" but click-free
 
-    _left.comp.setParams(defaults);
-    _right.comp.setParams(defaults);
+inline float sanitize(float x) noexcept { return limits::isFiniteBits(x) ? x : 0.f; }
 
-    // Default EQ: flat (all bands at 0 dB gain).
-    // The audiogram calibration sets the real gains via applyAudiogram().
-    for (int i = 0; i < kEqBands; ++i) {
-        _left.setEqBandGain(i, 0.f, kSampleRate);
-        _right.setEqBandGain(i, 0.f, kSampleRate);
-    }
+inline float approach(float x, float target, float step) noexcept {
+    return x < target ? std::min(target, x + step) : std::max(target, x - step);
 }
 
-// ============================================================
-//  setMasterVolume  —  any thread safe
-// ============================================================
+inline float linearToDb(float lin) noexcept { return lin < 1e-5f ? -96.f : 20.f * std::log10(lin); }
+
+/// Gentle WDRC bounds. Engineering placeholders, not a prescription (PRD §6 issue 5).
+CompressorParams clampCompressor(CompressorParams p) noexcept {
+    using limits::clampFinite;
+    p.thresholdDb  = clampFinite(p.thresholdDb, -60.f, -10.f, -40.f);
+    p.ratio        = clampFinite(p.ratio, 1.f, 3.f, 2.f);
+    p.kneeDb       = clampFinite(p.kneeDb, 0.f, 12.f, 6.f);
+    p.attackMs     = clampFinite(p.attackMs, 1.f, 50.f, 5.f);
+    p.releaseMs    = clampFinite(p.releaseMs, 20.f, 1000.f, 100.f);
+    p.makeupGainDb = clampFinite(p.makeupGainDb, 0.f, limits::kMaxMakeupGainDb, 0.f);
+    return p;
+}
+
+/// Peak of the combined EQ magnitude response, 1/12-octave grid 20 Hz..20 kHz.
+float eqPeakDb(const float g[kEqBands]) noexcept {
+    BiquadCoeffs c[kEqBands];
+    for (int i = 0; i < kEqBands; ++i)
+        c[i] = makeBiquadCoeffs(BiquadType::Peak, AudioEngine::kSampleRate, kEqFrequencies[i], kEqQ, g[i]);
+    float worst = -1e9f;
+    for (float f = 20.f; f <= 20000.f; f *= 1.0594631f) {
+        float db = 0.f;
+        for (const auto& ci : c) db += biquadMagnitudeDb(ci, AudioEngine::kSampleRate, f);
+        worst = std::max(worst, db);
+    }
+    return worst;
+}
+
+/// Level 2: overlapping bells sum, so bound the COMBINED response (+ makeup), not each band.
+/// Scales positive gains down; if that somehow fails to converge, drops all boost.
+void boundTotalGain(float g[kEqBands], float makeupDb) noexcept {
+    const float allowed = limits::kMaxTotalGainDb - makeupDb;
+    for (int iter = 0; iter < 12; ++iter) {
+        const float peak = eqPeakDb(g);
+        if (peak <= allowed + 0.05f) return;
+        const float s = peak > 0.f && allowed > 0.f ? allowed / peak : 0.f;
+        for (int i = 0; i < kEqBands; ++i) if (g[i] > 0.f) g[i] *= s;
+    }
+    if (eqPeakDb(g) > allowed + 0.05f)
+        for (int i = 0; i < kEqBands; ++i) g[i] = std::min(g[i], 0.f);
+}
+
+} // namespace
+
+AudioEngine::AudioEngine() noexcept
+    : _left(kSampleRate), _right(kSampleRate), _limiter(kSampleRate) {
+    const BiquadCoeffs hp = makeBiquadCoeffs(BiquadType::HighPass, kSampleRate, kHighPassHz, 0.7071f, 0.f);
+    _left.hpf.setCoeffs(hp);
+    _right.hpf.setCoeffs(hp);
+    {
+        std::lock_guard<std::mutex> lock(_writeMutex);
+        publishLocked();
+    }
+    _mailbox.read(_rt);
+    applyRt(/*ramp=*/false);
+}
+
+// ── Writer side ─────────────────────────────────────────────
+
+void AudioEngine::publishLocked() noexcept {
+    RtParams rt;
+    rt.comp = clampCompressor(_comp);
+    rt.volume = _volumeReq;
+    float gl[kEqBands], gr[kEqBands];
+    std::copy(_gainL, _gainL + kEqBands, gl);
+    std::copy(_gainR, _gainR + kEqBands, gr);
+    boundTotalGain(gl, rt.comp.makeupGainDb);
+    boundTotalGain(gr, rt.comp.makeupGainDb);
+    for (int i = 0; i < kEqBands; ++i) {
+        rt.eqL[i] = makeBiquadCoeffs(BiquadType::Peak, kSampleRate, kEqFrequencies[i], kEqQ, gl[i]);
+        rt.eqR[i] = makeBiquadCoeffs(BiquadType::Peak, kSampleRate, kEqFrequencies[i], kEqQ, gr[i]);
+    }
+    _mailbox.write(rt);
+}
+
 void AudioEngine::setMasterVolume(float linear) noexcept {
-    // Clamp to [0, 1] — negative gain makes no sense for a hearing aid
-    _masterGainLinear = (linear < 0.f) ? 0.f : (linear > 1.f) ? 1.f : linear;
-    _left.masterGainLinear  = _masterGainLinear;
-    _right.masterGainLinear = _masterGainLinear;
+    std::lock_guard<std::mutex> lock(_writeMutex);
+    _volumeReq = limits::clampFinite(linear, 0.f, 1.f, 0.f);
+    publishLocked();
 }
 
-// ============================================================
-//  setEqBandGain  —  any thread safe
-//  Updates the biquad coefficients for one frequency band.
-//  The BiquadFilter::setCoeffs() method writes to a pending field
-//  that is committed on the next call to process() — no lock needed.
-// ============================================================
-void AudioEngine::setEqBandGain(int band, float gainDbLeft, float gainDbRight) noexcept {
-    if (band < 0 || band >= kEqBands) return;
-    _left.setEqBandGain(band, gainDbLeft,  kSampleRate);
-    _right.setEqBandGain(band, gainDbRight, kSampleRate);
-}
-
-// ============================================================
-//  applyAudiogram  —  any thread safe
-//  Called once after the hearing test completes.
-//  leftGains / rightGains: array of kEqBands floats (dB compensation).
-//  The compensation gain is the audiogram threshold value: if the user
-//  has 40 dB HL loss at 4kHz, we apply +40 dB boost at 4kHz.
-//  (The compressor will prevent this from clipping loud sounds.)
-// ============================================================
-void AudioEngine::applyAudiogram(const float* leftGains,
-                                  const float* rightGains) noexcept {
+void AudioEngine::setBandGains(const float* leftDb, const float* rightDb) noexcept {
+    std::lock_guard<std::mutex> lock(_writeMutex);
     for (int i = 0; i < kEqBands; ++i) {
-        if (leftGains)  _left.setEqBandGain(i, leftGains[i],  kSampleRate);
-        if (rightGains) _right.setEqBandGain(i, rightGains[i], kSampleRate);
+        if (leftDb)  _gainL[i] = limits::clampBandGainDb(leftDb[i]);
+        if (rightDb) _gainR[i] = limits::clampBandGainDb(rightDb[i]);
     }
+    publishLocked();
 }
 
-// ============================================================
-//  setCompressorParams  —  any thread safe
-// ============================================================
+void AudioEngine::setEqBandGain(int band, float leftDb, float rightDb) noexcept {
+    if (band < 0 || band >= kEqBands) return;
+    std::lock_guard<std::mutex> lock(_writeMutex);
+    _gainL[band] = limits::clampBandGainDb(leftDb);
+    _gainR[band] = limits::clampBandGainDb(rightDb);
+    publishLocked();
+}
+
 void AudioEngine::setCompressorParams(const CompressorParams& params) noexcept {
-    _left.comp.setParams(params);
-    _right.comp.setParams(params);
+    std::lock_guard<std::mutex> lock(_writeMutex);
+    _comp = params;  // clamped in publishLocked
+    publishLocked();
 }
 
-// ============================================================
-//  setFeedbackSuppression  —  any thread safe
-// ============================================================
 void AudioEngine::setFeedbackSuppression(bool enabled) noexcept {
-    _left.afc.setEnabled(enabled);
+    _left.afc.setEnabled(enabled);   // atomics inside FeedbackSuppressor
     _right.afc.setEnabled(enabled);
 }
 
-// ============================================================
-//  setAfcDelayMs  —  any thread safe
-// ============================================================
 void AudioEngine::setAfcDelayMs(float ms) noexcept {
+    ms = limits::clampFinite(ms, 0.f, 50.f, 5.f);
     _left.afc.setDelayMs(ms);
     _right.afc.setDelayMs(ms);
 }
 
-// ============================================================
-//  process  —  THE real-time audio callback
-//  ─────────────────────────────────────────────────────────────
-//  Called by the platform audio callback (Oboe / CoreAudio tap).
-//  inputData:  interleaved stereo Float32  [L0, R0, L1, R1, …]
-//  outputData: same layout — may be the same pointer (in-place OK)
-//  numFrames:  number of stereo frames in this buffer
-//
-//  PERFORMANCE BUDGET (at 48kHz, 240-frame buffer = 5ms):
-//    Budget per frame: ~1/48000 = 20.8 µs
-//    AFC:    ~6 ops/sample  → ~288 ops/frame  → trivial
-//    EQ×6:   ~5 ops/biquad  → ~1440 ops/frame → trivial
-//    Comp:   ~15 ops/sample → ~720 ops/frame  → trivial
-//    Total:  ~2448 ops/frame (ARM64 pipeline: ~1ns each) ≈ 2.5µs/frame
-//    Leaves 18.3µs headroom — far above the 20ms round-trip target.
-//
-//  RULES (enforced by convention — no runtime check):
-//    1. No heap allocation (new/malloc/std::vector construction)
-//    2. No mutex lock / spinlock
-//    3. No system calls (no I/O, no file access, no logging)
-//    4. No exceptions
-//    5. No dynamic dispatch (no virtual calls in the hot loop)
-// ============================================================
-void AudioEngine::process(const float* __restrict__ inputData,
-                                float* __restrict__ outputData,
-                          int numFrames) noexcept {
+// ── Audio thread ────────────────────────────────────────────
 
-    // Peak meter accumulator: track max absolute sample this buffer
-    float inputPeak  = 0.f;
-    float outputPeak = 0.f;
+void AudioEngine::applyRt(bool ramp) noexcept {
+    const int n = ramp ? kParamRampSamples : 0;
+    for (int i = 0; i < kEqBands; ++i) {
+        _left.eq[i].rampTo(_rt.eqL[i], n);
+        _right.eq[i].rampTo(_rt.eqR[i], n);
+    }
+    _left.comp.setParams(_rt.comp);
+    _right.comp.setParams(_rt.comp);
+    if (_rt.volume != _volumeTarget || !ramp) {
+        _volumeTarget = _rt.volume;
+        if (ramp) {
+            _volumeStep = (_volumeTarget - _volume) / float(kParamRampSamples);
+            _volumeRampLeft = kParamRampSamples;
+        } else {
+            _volume = _volumeTarget;
+            _volumeRampLeft = 0;
+        }
+    }
+}
+
+void AudioEngine::process(const float* input, float* output, int numFrames) noexcept {
+    if (!output || numFrames <= 0) return;
+    if (!input) {
+        std::fill(output, output + 2 * numFrames, 0.f);
+        return;
+    }
+    if (_mailbox.read(_rt)) applyRt(/*ramp=*/true);
+
+    const float muteTarget   = _muted.load(std::memory_order_relaxed) ? 0.f : 1.f;
+    const float bypassTarget = _bypass.load(std::memory_order_relaxed) ? 1.f : 0.f;
+    float inPeak = 0.f, outPeak = 0.f;
+    uint32_t limited = 0;
 
     for (int i = 0; i < numFrames; ++i) {
-        // Deinterleave: input is [L, R, L, R, …]
-        float inL = inputData[i * 2 + 0];
-        float inR = inputData[i * 2 + 1];
+        // Read both samples before writing: input and output may alias.
+        const float inL = sanitize(input[2 * i]);
+        const float inR = sanitize(input[2 * i + 1]);
+        inPeak = std::max(inPeak, std::max(std::fabs(inL), std::fabs(inR)));
 
-        // Track input peak
-        const float absL = inL < 0.f ? -inL : inL;
-        const float absR = inR < 0.f ? -inR : inR;
-        if (absL > inputPeak) inputPeak = absL;
-        if (absR > inputPeak) inputPeak = absR;
+        if (_volumeRampLeft > 0) _volume = --_volumeRampLeft ? _volume + _volumeStep : _volumeTarget;
+        const float wetL = sanitize(_left.process(inL) * _volume);
+        const float wetR = sanitize(_right.process(inR) * _volume);
 
-        // ── Per-channel DSP chain ─────────────────────────────────────
-        //   AFC → EQ[6] → Compressor → master gain
-        // Each stage is a single inline function call — the compiler
-        // will inline everything into this loop for zero call overhead.
-        float outL = _left.process(inL);
-        float outR = _right.process(inR);
+        _bypassMix = approach(_bypassMix, bypassTarget, 1.f / kBypassRampSamples);
+        _muteGain  = approach(_muteGain, muteTarget, 1.f / kMuteRampSamples);
+        // At mix == 1 this is exactly inL (wet * 0 == 0), so bypass is bit-exact.
+        float outL = (inL * _bypassMix + wetL * (1.f - _bypassMix)) * _muteGain;
+        float outR = (inR * _bypassMix + wetR * (1.f - _bypassMix)) * _muteGain;
+        if (_limiter.process(outL, outR)) ++limited;
 
-        // ── Hard clip safety limiter ──────────────────────────────────
-        // Prevents digital clipping if makeup gain is misconfigured.
-        // Cheap: no math, just a branch-predictor-friendly compare.
-        outL = outL >  1.f ?  1.f : outL < -1.f ? -1.f : outL;
-        outR = outR >  1.f ?  1.f : outR < -1.f ? -1.f : outR;
-
-        // Reinterleave output
-        outputData[i * 2 + 0] = outL;
-        outputData[i * 2 + 1] = outR;
-
-        // Track output peak
-        const float absOL = outL < 0.f ? -outL : outL;
-        const float absOR = outR < 0.f ? -outR : outR;
-        if (absOL > outputPeak) outputPeak = absOL;
-        if (absOR > outputPeak) outputPeak = absOR;
+        output[2 * i]     = outL;
+        output[2 * i + 1] = outR;
+        outPeak = std::max(outPeak, std::max(std::fabs(outL), std::fabs(outR)));
     }
 
-    // ── Update atomic meters (read by UI thread via JSI) ─────────────
-    // memory_order_relaxed: we don't need sequential consistency,
-    // just eventual visibility — a stale meter value is fine.
-    _inputLevelDb.store(linearToDb(inputPeak),  std::memory_order_relaxed);
-    _outputLevelDb.store(linearToDb(outputPeak), std::memory_order_relaxed);
+    _inputLevelDb.store(linearToDb(inPeak), std::memory_order_relaxed);
+    _outputLevelDb.store(linearToDb(outPeak), std::memory_order_relaxed);
+    if (limited) _limiterEngaged.fetch_add(limited, std::memory_order_relaxed);
 }
 
 } // namespace clarihear
