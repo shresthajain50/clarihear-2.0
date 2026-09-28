@@ -17,7 +17,8 @@
 // ============================================================
 
 import {NativeModules} from 'react-native';
-import type {Audiogram, CompressorParams, EqBand} from './types';
+import type {CompressorParams, EqBand} from './types';
+import type {DspProfile} from '../hearing/types';
 
 // ── Frequency bands (Hz) for each EQ band index ──────────────
 export const EQ_FREQUENCIES: Record<EqBand, number> = {
@@ -123,18 +124,16 @@ export function setEqBandGain(
 }
 
 /**
- * Apply a full audiogram result in one call.
- * The DSP engine will immediately update all 6 EQ bands per ear.
- *
- * @param audiogram — {left: [6 dB HL values], right: [6 dB HL values]}
- *
- * Example: if the user has 40 dB HL loss at 4kHz in the left ear,
- * pass left[4] = 40. The engine applies +40 dB boost at 4kHz.
+ * Apply a fitted DSP profile's band gains (dB gain, NOT dB HL).
+ * The only input is a DspProfile from hearing/fitting.ts; thresholds can't be passed here.
+ * The engine clamps every gain again on its side (cpp/GainConstraints.h).
  */
-export function applyAudiogram(audiogram: Audiogram): void {
-  const {left, right} = audiogram;
+export function applyDspProfile(dsp: DspProfile): void {
+  // ponytail: still rides the legacy native `applyAudiogram` method name; renamed in the bridge ticket.
+  const left = [...dsp.bandGainsLeft];
+  const right = [...dsp.bandGainsRight];
   if (jsi) {
-    jsi.applyAudiogram([...left], [...right]);
+    jsi.applyAudiogram(left, right);
   } else {
     nativeBridge?.applyAudiogram?.(left, right);
   }
@@ -194,12 +193,12 @@ export function getBandHz(band: EqBand): number {
   return EQ_FREQUENCIES[band];
 }
 
-// ── Default compressor preset for clinical hearing aid use ────
+// ── Engineering placeholder compressor (NOT a clinical prescription, PRD §6 issue 5) ──
 export const DEFAULT_COMPRESSOR: CompressorParams = {
   thresholdDb:  -40,
-  ratio:          4,
+  ratio:          2,
   kneeDb:         6,
   attackMs:       5,
   releaseMs:    100,
-  makeupGainDb:  20,
+  makeupGainDb:   0,
 };

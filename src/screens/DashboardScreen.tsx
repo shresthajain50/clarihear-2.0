@@ -7,6 +7,7 @@
 // ============================================================
 
 import React, {useState, useCallback, useRef} from 'react';
+import type {DspProfile} from '../hearing/types';
 import {
   Animated,
   Pressable,
@@ -33,20 +34,21 @@ type EqGains = {l: number; r: number}[];
 const FLAT_EQ: EqGains = Array.from({length: 6}, () => ({l: 0, r: 0}));
 
 interface Props {
-  audiogram?: {left: number[]; right: number[]};
+  /** Fitted gains from hearing/fitting.ts (dB gain, not dB HL). */
+  dspProfile?: DspProfile;
   onOpenSettings?: () => void;
 }
 
-export default function DashboardScreen({audiogram, onOpenSettings}: Props) {
+export default function DashboardScreen({dspProfile, onOpenSettings}: Props) {
   const audio = useAudio();
   const {inputDb, outputDb} = useLevel(audio.isRunning);
 
   // ── UI state ──────────────────────────────────────────────────
   const [eqGains, setEqGains] = useState<EqGains>(() => {
-    if (audiogram) {
+    if (dspProfile) {
       return Array.from({length: 6}, (_, i) => ({
-        l: audiogram.left[i]  ?? 0,
-        r: audiogram.right[i] ?? 0,
+        l: dspProfile.bandGainsLeft[i],
+        r: dspProfile.bandGainsRight[i],
       }));
     }
     return FLAT_EQ;

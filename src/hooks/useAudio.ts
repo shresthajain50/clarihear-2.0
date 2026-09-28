@@ -4,7 +4,8 @@
 
 import {useState, useCallback, useEffect, useRef} from 'react';
 import * as Audio from '../native/ClarihearAudio';
-import type {Audiogram, CompressorParams, EqBand} from '../native/types';
+import type {CompressorParams, EqBand} from '../native/types';
+import type {DspProfile} from '../hearing/types';
 
 interface AudioState {
   isRunning: boolean;
@@ -19,7 +20,7 @@ interface UseAudioReturn extends AudioState {
   toggle: () => Promise<void>;
   setVolume: (linear: number) => void;
   setEqBand: (band: EqBand, gainL: number, gainR: number) => void;
-  applyAudiogram: (audiogram: Audiogram) => void;
+  applyDspProfile: (dsp: DspProfile) => void;
   setCompressor: (params: CompressorParams) => void;
   setFeedbackSuppression: (enabled: boolean) => void;
 }
@@ -65,8 +66,8 @@ export function useAudio(): UseAudioReturn {
     Audio.setEqBandGain(band, gainL, gainR);
   }, []);
 
-  const applyAudiogram = useCallback((audiogram: Audiogram) => {
-    Audio.applyAudiogram(audiogram);
+  const applyDspProfile = useCallback((dsp: DspProfile) => {
+    Audio.applyDspProfile(dsp);
   }, []);
 
   const setCompressor = useCallback((params: CompressorParams) => {
@@ -84,7 +85,7 @@ export function useAudio(): UseAudioReturn {
     toggle,
     setVolume,
     setEqBand,
-    applyAudiogram,
+    applyDspProfile,
     setCompressor,
     setFeedbackSuppression,
   };

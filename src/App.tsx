@@ -27,13 +27,17 @@ import PermissionScreen from './screens/PermissionScreen';
 import AudiogramScreen  from './screens/AudiogramScreen';
 import DashboardScreen  from './screens/DashboardScreen';
 import type {Audiogram}  from './native/types';
-import {applyAudiogram as dspApplyAudiogram} from './native/ClarihearAudio';
+import {applyDspProfile} from './native/ClarihearAudio';
+import {FITTING_VERSION, fitHearingProfile} from './hearing/fitting';
+import {dbHL, type DspProfile, type FrequencyThresholds} from './hearing/types';
+
+const toThresholds = (hl: readonly number[]) => hl.map(dbHL) as unknown as FrequencyThresholds;
 
 type Screen = 'onboarding' | 'permission' | 'audiogram' | 'dashboard';
 
 export default function App() {
   const [screen, setScreen]         = useState<Screen>('onboarding');
-  const [audiogram, setAudiogram]   = useState<Audiogram | undefined>(undefined);
+  const [dspProfile, setDspProfile] = useState<DspProfile | undefined>(undefined);
 
   // ── Request mic permission (Android manual request) ──────────
   const requestMicPermission = useCallback(async (): Promise<boolean> => {
@@ -81,9 +85,23 @@ export default function App() {
   }, []);
 
   const onAudiogramComplete = useCallback((ag: Audiogram) => {
-    setAudiogram(ag);
-    // Apply the audiogram to the DSP engine immediately
-    dspApplyAudiogram(ag);
+    // Thresholds never reach the engine: they go through the fitting module first.
+    const fit = fitHearingProfile({
+      left: toThresholds(ag.left),
+      right: toThresholds(ag.right),
+      source: 'audiogram_import',
+      confidence: 1,
+      fittingVersion: FITTING_VERSION,
+    });
+    if (fit.kind === 'refer') {
+      Alert.alert(
+        'Professional evaluation recommended',
+        'A professional hearing evaluation is recommended before using personalized amplification.',
+      );
+      return;
+    }
+    setDspProfile(fit.dsp);
+    applyDspProfile(fit.dsp);
     setScreen('dashboard');
   }, []);
 
@@ -120,10 +138,7 @@ export default function App() {
 
       {screen === 'dashboard' && (
         <DashboardScreen
-          audiogram={audiogram
-            ? {left: audiogram.left as unknown as number[],
-               right: audiogram.right as unknown as number[]}
-            : undefined}
+          dspProfile={dspProfile}
           onOpenSettings={() =>
             Alert.alert('Settings', 'Settings panel coming in Phase 6.')
           }

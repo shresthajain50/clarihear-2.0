@@ -81,3 +81,52 @@ the map are actually run and their output pasted.
 
 **Needs:** rerun with `gh`, `git`, `g++`/`cmake` and `npm` allowed (or a human
 runs the listed commands), then publish the map to Issues.
+
+---
+
+## Q4 — update (2026-09-28, second session)
+
+The tooling block is resolved: `gh`, `git`, `g++`/`cmake` and `npm` all run now.
+The wayfinder map is published as GitHub issue #1, with child tickets #2–#18.
+`docs/product/WAYFINDER_MAP.md` was never committed and is superseded by the
+issue map. Q2's reference to `src/hearing/fitting.ts` became true with the
+fitting-engine ticket (#3).
+
+---
+
+## Q2 — addendum: the rule is NAL-R
+
+**Context:** Q2 said "half-gain family / NAL-R-style". The implementation uses
+the published NAL-R formula (Byrne & Dillon 1986):
+`IG(f) = 0.05·(H500+H1k+H2k) + 0.31·H(f) + k(f)`, with k = −17, −8, +1, −1, −2
+at 250/500/1k/2k/4k, and the 6 kHz value (−2) reused at 8 kHz. It is
+non-proprietary. It is used as a research reference only, never as a claim of
+NAL-NL2 or DSL v5.
+
+**Default:** after NAL-R the pipeline applies the first-fit factor 0.6 (on by
+default), zero gain at or below 20 dB HL, a per-band ceiling of 20 dB, and
+smoothing that only lowers gain to keep neighbouring bands within 8 dB.
+`FITTING_VERSION = 'clarihear-research-0.1.0'`.
+
+**Needs:** audiologist review of the constants, and of the 8 kHz extrapolation.
+
+---
+
+## Q5 — Self-fit eligibility cut-offs from an audiogram
+
+**Context:** PRD §3 limits self-fitting to mild-to-moderate losses. Severe,
+profound or unilateral/asymmetric losses go to professional care. The PRD
+gives no numbers.
+
+**Default** (`REFERRAL_CRITERIA` in `src/hearing/fitting.ts`): refer instead
+of fitting when either of these holds:
+- **Beyond self-fit range:** either ear's 4-frequency PTA (500/1k/2k/4k) is
+  above 55 dB HL, or any single threshold at 500–4k is above 70 dB HL.
+- **Asymmetric:** the inter-ear difference is ≥ 20 dB at any one frequency, or
+  ≥ 15 dB at two or more frequencies. This is stricter than the common
+  AAO-HNS-style ≥ 15 dB-at-2-adjacent rule because it doesn't require the
+  frequencies to be adjacent.
+
+On referral the app shows the PRD §9 copy and applies no gain.
+
+**Needs:** audiologist sign-off on both cut-offs.
