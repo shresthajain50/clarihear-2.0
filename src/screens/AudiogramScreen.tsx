@@ -1,16 +1,9 @@
 // ============================================================
-//  screens/AudiogramScreen.tsx  —  Hearing Test  [Phase 5]
+//  screens/AudiogramScreen.tsx  —  Enter a professional audiogram
 //
-//  Implements a simplified Hughson-Westlake pure-tone screening
-//  for frequencies: 250, 500, 1000, 2000, 4000, 8000 Hz.
-//
-//  For clinical use, an audiologist administers the real test.
-//  This screen does two things:
-//   1. IMPORT path: User plots their audiogram from their
-//      audiologist report by dragging markers on the audiogram grid
-//   2. SCREEN path: Simplified screening with animated cues
-//      (user responds when they hear the tone — tones are generated
-//      by a short sine burst via the AudioEngine signal injector)
+//  Manual entry of thresholds FROM AN AUDIOLOGIST'S REPORT (PRD §13 Path A).
+//  This is NOT a hearing test (PRD §6 issue 1): no tones are played and
+//  nothing is measured. Thresholds go to hearing/fitting.ts, never to the engine.
 // ============================================================
 
 import React, {useState, useCallback, useRef} from 'react';
@@ -29,13 +22,6 @@ import type {Audiogram} from '../native/types';
 const FREQUENCIES = [250, 500, 1000, 2000, 4000, 8000];
 const FREQ_LABELS = ['250', '500', '1k', '2k', '4k', '8k'];
 const HL_LEVELS   = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110];
-const HEARING_CATEGORIES = [
-  {label: 'Normal',         range: [0, 25],  color: Colors.success},
-  {label: 'Mild Loss',      range: [26, 40], color: Colors.warning},
-  {label: 'Moderate Loss',  range: [41, 55], color: Colors.eq[0]},
-  {label: 'Severe Loss',    range: [56, 70], color: Colors.danger},
-  {label: 'Profound Loss',  range: [71, 110],color: '#FF2D55'},
-];
 
 // Default audiogram — flat (normal hearing)
 const DEFAULT_AUDIOGRAM: Audiogram = {
@@ -49,12 +35,6 @@ interface Props {
 }
 
 type Ear = 'left' | 'right';
-
-function getHearingCategory(avgHL: number) {
-  return HEARING_CATEGORIES.find(
-    c => avgHL >= c.range[0] && avgHL <= c.range[1],
-  ) ?? HEARING_CATEGORIES[HEARING_CATEGORIES.length - 1];
-}
 
 export default function AudiogramScreen({onComplete, onSkip}: Props) {
   const [audiogram, setAudiogram] = useState<Audiogram>(DEFAULT_AUDIOGRAM);
@@ -83,8 +63,6 @@ export default function AudiogramScreen({onComplete, onSkip}: Props) {
   // ── Average hearing level ────────────────────────────────────
   const avgLeft  = Math.round(audiogram.left.reduce((a, b) => a + b, 0) / 6);
   const avgRight = Math.round(audiogram.right.reduce((a, b) => a + b, 0) / 6);
-  const catLeft  = getHearingCategory(avgLeft);
-  const catRight = getHearingCategory(avgRight);
 
   // ── Grid geometry ─────────────────────────────────────────────
   const GRID_H = 240;
@@ -217,8 +195,8 @@ export default function AudiogramScreen({onComplete, onSkip}: Props) {
 
         {/* Hearing summary cards */}
         <View style={styles.summaryRow}>
-          <HearingCard ear="Left"  avg={avgLeft}  category={catLeft}  color={Colors.primary} />
-          <HearingCard ear="Right" avg={avgRight} category={catRight} color={Colors.secondary} />
+          <HearingCard ear="Left"  avg={avgLeft}  color={Colors.primary} />
+          <HearingCard ear="Right" avg={avgRight} color={Colors.secondary} />
         </View>
 
         {/* Legend */}
@@ -258,18 +236,12 @@ export default function AudiogramScreen({onComplete, onSkip}: Props) {
   );
 }
 
-function HearingCard({ear, avg, category, color}: {
-  ear: string; avg: number; category: typeof HEARING_CATEGORIES[0]; color: string;
-}) {
+// No severity labels: showing "Moderate Loss" etc. would be a diagnosis (ENGINEERING_SKILL rule 1).
+function HearingCard({ear, avg, color}: {ear: string; avg: number; color: string}) {
   return (
     <View style={[Styles.glassCard, styles.hearingCard]}>
       <Text style={[styles.hearingEar, {color}]}>{ear} Ear</Text>
       <Text style={[styles.hearingAvg, {color}]}>{avg}<Text style={styles.hearingUnit}> dBHL</Text></Text>
-      <View style={[styles.hearingBadge, {backgroundColor: category.color + '30'}]}>
-        <Text style={[styles.hearingBadgeText, {color: category.color}]}>
-          {category.label}
-        </Text>
-      </View>
     </View>
   );
 }

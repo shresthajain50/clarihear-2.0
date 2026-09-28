@@ -86,13 +86,19 @@ export default function App() {
 
   const onAudiogramComplete = useCallback((ag: Audiogram) => {
     // Thresholds never reach the engine: they go through the fitting module first.
-    const fit = fitHearingProfile({
-      left: toThresholds(ag.left),
-      right: toThresholds(ag.right),
-      source: 'audiogram_import',
-      confidence: 1,
-      fittingVersion: FITTING_VERSION,
-    });
+    let fit: ReturnType<typeof fitHearingProfile>;
+    try {
+      fit = fitHearingProfile({
+        left: toThresholds(ag.left),
+        right: toThresholds(ag.right),
+        source: 'audiogram_import',
+        confidence: 1,
+        fittingVersion: FITTING_VERSION,
+      });
+    } catch {
+      Alert.alert('Check your audiogram', 'Some values look out of range. Please re-enter them from your report.');
+      return;
+    }
     if (fit.kind === 'refer') {
       Alert.alert(
         'Professional evaluation recommended',

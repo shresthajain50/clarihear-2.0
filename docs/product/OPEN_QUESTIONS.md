@@ -175,3 +175,20 @@ matching cut-offs are adopted.
 
 **Needs:** a business decision (licence from hearX vs record and validate
 in-house) and a named owner for stimulus level calibration.
+
+---
+
+## Q5 — addendum: 250 Hz / 8 kHz severity rule (2026-09-28, clinical-safety review)
+
+**Context:** The review found that the severity check only looked at 500–4k.
+Bilateral `[85, 20, 20, 20, 20, 20]` or `[.., 110 at 8k]` was fitted, not referred.
+
+**Default:** refer when any threshold at **any** frequency is ≥ 90 dB HL
+(`REFERRAL_CRITERIA.maxAnyThresholdDbHL`). The research recommends this, and
+it sits on top of the stricter 500–4k > 70 rule. It deliberately does not
+refer an 8 kHz-only 70–85 dB loss, which is typical steep presbycusis and
+still gets at most +20 dB, so as not to over-refer the core user group.
+
+**Needs:** audiologist view on whether an isolated low-frequency (250 Hz)
+loss should refer at a lower level, since it is a possible conductive/Ménière's
+flag.

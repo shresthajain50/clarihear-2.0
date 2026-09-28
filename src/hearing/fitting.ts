@@ -37,6 +37,8 @@ export const REFERRAL_CRITERIA = {
   maxPta4DbHL: 55,
   /** Any single threshold at 500–4k above this → beyond self-fit range. */
   maxSingleThresholdDbHL: 70,
+  /** Any threshold at ANY frequency (incl. 250 Hz, 8 kHz) at or above this → beyond self-fit range. */
+  maxAnyThresholdDbHL: 90,
   /** Inter-ear difference ≥ this at any one frequency → asymmetric. */
   asymmetrySingleDb: 20,
   /** …or ≥ this at two or more frequencies. */
@@ -100,6 +102,7 @@ function fitEar(h: FrequencyThresholds, factor: number): BandGains {
   // Smooth by lowering whichever neighbour exceeds the step. Never raises gain.
   for (let i = 1; i < g.length; i++) g[i] = Math.min(g[i], g[i - 1] + maxInterBandStepDb);
   for (let i = g.length - 2; i >= 0; i--) g[i] = Math.min(g[i], g[i + 1] + maxInterBandStepDb);
+  if (!g.every(v => Number.isFinite(v) && v >= 0 && v <= maxBandGainDb)) throw new Error('fitting produced out-of-bounds gain');
   return g as unknown as BandGains & GainDb[];
 }
 
@@ -108,11 +111,13 @@ function validate(h: FrequencyThresholds, side: string) {
     throw new RangeError(`${side} ear: expected ${BAND_COUNT} thresholds`);
   }
   const {minThresholdDbHL: lo, maxThresholdDbHL: hi} = FITTING_LIMITS;
-  h.forEach((t, i) => {
-    if (!Number.isFinite(t) || t < lo || t > hi) {
+  // Index loop, not forEach: forEach skips holes, so [20, , 20, …] would pass and fit to NaN.
+  for (let i = 0; i < BAND_COUNT; i++) {
+    const t = h[i];
+    if (typeof t !== 'number' || !Number.isFinite(t) || t < lo || t > hi) {
       throw new RangeError(`${side} ear: threshold[${i}] = ${t} dB HL is outside ${lo}..${hi}`);
     }
-  });
+  }
 }
 
 function referralReasons(l: FrequencyThresholds, r: FrequencyThresholds): ReferralReason[] {
@@ -120,7 +125,9 @@ function referralReasons(l: FrequencyThresholds, r: FrequencyThresholds): Referr
   const reasons: ReferralReason[] = [];
   const pta4 = (h: FrequencyThresholds) => (h[1] + h[2] + h[3] + h[4]) / 4;
   const severe = (h: FrequencyThresholds) =>
-    pta4(h) > c.maxPta4DbHL || h.slice(1, 5).some(t => t > c.maxSingleThresholdDbHL);
+    pta4(h) > c.maxPta4DbHL ||
+    h.slice(1, 5).some(t => t > c.maxSingleThresholdDbHL) ||
+    h.some(t => t >= c.maxAnyThresholdDbHL);
   if (severe(l) || severe(r)) reasons.push('beyond_self_fit_range');
 
   const diffs = l.map((t, i) => Math.abs(t - r[i]));

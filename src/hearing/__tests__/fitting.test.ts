@@ -119,6 +119,51 @@ describe('fitHearingProfile', () => {
     expect(() => fitHearingProfile(profile(l as unknown as FrequencyThresholds))).toThrow(/threshold/i);
   });
 
+  it('rejects a sparse audiogram (holes would otherwise fit to NaN)', () => {
+    // eslint-disable-next-line no-sparse-arrays
+    const holey = [20, , 20, 20, 20, 20] as unknown as FrequencyThresholds;
+    expect(() => fitHearingProfile(profile(holey))).toThrow(/threshold\[1\]/);
+  });
+
+  it('refers a loss confined to 250 Hz or 8 kHz once it reaches 90 dB HL', () => {
+    expect(fitHearingProfile(profile(ear(20, 25, 30, 40, 50, 90))).kind).toBe('refer');
+    expect(fitHearingProfile(profile(ear(90, 20, 20, 20, 20, 20))).kind).toBe('refer');
+    expect(fitHearingProfile(profile(ear(20, 25, 30, 40, 50, 85))).kind).toBe('fitted'); // steep presbycusis still self-fits
+  });
+
+  it.each([
+    ['PTA4 exactly 55 fits', ear(30, 55, 55, 55, 55, 55), 'fitted'],
+    ['PTA4 55.25 refers', ear(30, 55, 55, 55, 56, 55), 'refer'],
+    ['single 70 at 2k fits', ear(20, 40, 40, 70, 50, 50), 'fitted'],
+    ['single 71 at 2k refers', ear(20, 40, 40, 71, 50, 50), 'refer'],
+  ])('severity boundary: %s', (_label, h, kind) => {
+    expect(fitHearingProfile(profile(h as FrequencyThresholds)).kind).toBe(kind);
+  });
+
+  it.each([
+    ['19 dB at one frequency fits', ear(30, 30, 30, 30, 30, 30), ear(30, 30, 30, 49, 30, 30), 'fitted'],
+    ['20 dB at one frequency refers', ear(30, 30, 30, 30, 30, 30), ear(30, 30, 30, 50, 30, 30), 'refer'],
+    ['15 dB at one frequency fits', ear(30, 30, 30, 30, 30, 30), ear(30, 30, 45, 30, 30, 30), 'fitted'],
+    ['15 dB at two frequencies refers', ear(30, 30, 30, 30, 30, 30), ear(30, 30, 45, 30, 45, 30), 'refer'],
+  ])('asymmetry boundary: %s', (_label, l, r, kind) => {
+    expect(fitHearingProfile(profile(l as FrequencyThresholds, r as FrequencyThresholds)).kind).toBe(kind);
+  });
+
+  it('every fitted gain is finite and within 0..ceiling across the whole valid audiogram grid', () => {
+    let fittedCount = 0;
+    for (let a = -10; a <= 120; a += 10)
+      for (let b = -10; b <= 120; b += 10)
+        for (const firstFit of [true, false]) {
+          const r = fitHearingProfile(profile(ear(a, b, a, b, a, b)), {firstFit});
+          if (r.kind !== 'fitted') continue;
+          fittedCount++;
+          for (const g of [...r.dsp.bandGainsLeft, ...r.dsp.bandGainsRight]) {
+            expect(Number.isFinite(g) && g >= 0 && g <= FITTING_LIMITS.maxBandGainDb).toBe(true);
+          }
+        }
+    expect(fittedCount).toBeGreaterThan(20);
+  });
+
   it('rejects an audiogram with the wrong number of frequencies', () => {
     expect(() => fitHearingProfile(profile(ear(20, 20, 20)))).toThrow(/6 thresholds/);
   });
