@@ -11,7 +11,7 @@
 // ============================================================
 
 import React, {useCallback, useReducer} from 'react';
-import {Alert, PermissionsAndroid, Platform, StatusBar, StyleSheet, Text, View} from 'react-native';
+import {Alert, Linking, PermissionsAndroid, Platform, StatusBar, StyleSheet, Text, View} from 'react-native';
 import {Colors} from './theme';
 import {appFlow, initialFlow} from './app/appFlow';
 import {FITTING_VERSION, fitHearingProfile} from './hearing/fitting';
@@ -27,6 +27,12 @@ import SettingsScreen from './screens/SettingsScreen';
 import DeveloperScreen from './screens/DeveloperScreen';
 
 const toThresholds = (hl: readonly number[]) => hl.map(dbHL) as unknown as FrequencyThresholds;
+
+const micNeeded = () =>
+  Alert.alert('Microphone needed', 'Live listening needs microphone access. You can allow it in Settings.', [
+    {text: 'Not now', style: 'cancel'},
+    {text: 'Open Settings', onPress: () => Linking.openSettings()},
+  ]);
 
 async function requestMicPermission(): Promise<boolean> {
   if (Platform.OS !== 'android') return true; // iOS prompts when audio starts
@@ -48,7 +54,7 @@ export default function App() {
 
   const onPermission = useCallback(async () => {
     if (await requestMicPermission()) dispatch({type: 'DEVICE_READY'});
-    else Alert.alert('Microphone needed', 'Live listening needs microphone access. You can allow it in Settings.');
+    else micNeeded();
   }, []);
 
   const onAudiogram = useCallback((ag: Audiogram) => {
@@ -76,7 +82,7 @@ export default function App() {
         return (
           <PermissionScreen
             onGranted={onPermission}
-            onDenied={() => Alert.alert('Microphone needed', 'Live listening needs microphone access. You can allow it in Settings.')}
+            onDenied={() => micNeeded()}
           />
         );
       case 'screening':

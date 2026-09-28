@@ -26,9 +26,10 @@ changing hearing, fitting, or DSP code.
 # C++ DSP tests (headless, run in any Linux/macOS shell)
 cmake -S cpp -B build/cpp && cmake --build build/cpp && ctest --test-dir build/cpp --output-on-failure
 
-# TypeScript tests / types
+# TypeScript tests / types / lint (0 errors required; style warnings tolerated)
 npm test
 npx tsc --noEmit
+npm run lint
 ```
 
 These cannot run in the headless dev container: Xcode/Gradle builds, simulators,

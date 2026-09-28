@@ -32,7 +32,8 @@ describe('safety / eligibility questionnaire (PRD §9)', () => {
   });
 
   it('treats unanswered questions as not eligible (never as a pass)', () => {
-    const {vertigo: _v, ...partial} = safe;
+    const partial: SafetyAnswers = {...safe};
+    delete partial.vertigo;
     expect(assessEligibility(partial)).toEqual({kind: 'incomplete', missing: ['vertigo']});
     expect(assessEligibility({})).toMatchObject({kind: 'incomplete'});
   });

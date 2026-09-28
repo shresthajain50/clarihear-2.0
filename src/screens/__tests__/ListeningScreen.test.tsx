@@ -60,9 +60,11 @@ describe('ListeningScreen (PRD §16)', () => {
 
   it('mute is always reachable and immediate', async () => {
     render(<ListeningScreen dsp={dsp} onOpenSettings={() => {}} />);
-    fireEvent.press(screen.getByLabelText('Mute'));
+    const mute = () => screen.getByRole('switch', {name: 'Mute'});
+    fireEvent.press(mute());
     expect(A.setMuted).toHaveBeenLastCalledWith(true);
-    fireEvent.press(screen.getByLabelText('Unmute'));
+    expect(mute().props.accessibilityState).toMatchObject({checked: true});
+    fireEvent.press(mute());
     expect(A.setMuted).toHaveBeenLastCalledWith(false);
   });
 
@@ -83,8 +85,9 @@ describe('ListeningScreen (PRD §16)', () => {
 
   it('has exactly three modes and switching applies it', () => {
     render(<ListeningScreen dsp={dsp} onOpenSettings={() => {}} />);
-    for (const m of ['Everyday', 'Conversation', 'Quiet']) expect(screen.getByRole('button', {name: m})).toBeTruthy();
-    fireEvent.press(screen.getByRole('button', {name: 'Conversation'}));
+    for (const m of ['Everyday', 'Conversation', 'Quiet']) expect(screen.getByRole('radio', {name: m})).toBeTruthy();
+    fireEvent.press(screen.getByRole('radio', {name: 'Conversation'}));
+    expect(screen.getByRole('radio', {name: 'Conversation'}).props.accessibilityState).toMatchObject({checked: true});
     expect(A.applyDspProfile.mock.calls.at(-1)![0].mode).toBe('conversation');
   });
 
@@ -106,6 +109,23 @@ describe('ListeningScreen (PRD §16)', () => {
     render(<ListeningScreen dsp={dsp} onOpenSettings={() => {}} />);
     await act(async () => fireEvent.press(screen.getByLabelText('Turn listening assistance on')));
     expect(screen.getByText(/Connect headphones to start listening/)).toBeTruthy();
+  });
+
+  it('stops the engine when the screen is left while listening (no invisible live mic)', async () => {
+    const {unmount} = render(<ListeningScreen dsp={dsp} onOpenSettings={() => {}} />);
+    await act(async () => fireEvent.press(screen.getByLabelText('Turn listening assistance on')));
+    unmount();
+    expect(A.stopAudio).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops the engine if start finishes after the screen was left', async () => {
+    let resolve!: (ok: boolean) => void;
+    A.startAudio.mockReturnValueOnce(new Promise<boolean>(r => (resolve = r)));
+    const {unmount} = render(<ListeningScreen dsp={dsp} onOpenSettings={() => {}} />);
+    fireEvent.press(screen.getByLabelText('Turn listening assistance on'));
+    unmount();
+    await act(async () => resolve(true));
+    expect(A.stopAudio).toHaveBeenCalled();
   });
 
   it('shows the PRD failure copy when audio cannot start', async () => {

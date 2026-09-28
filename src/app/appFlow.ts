@@ -69,7 +69,9 @@ export function appFlow(s: FlowState, e: FlowEvent): FlowState {
   const go = (state: AppState, patch: Partial<FlowState> = {}): FlowState => ({...s, ...patch, state});
 
   if (s.state === 'professional_referral') {
-    return e.type === 'RESTART' ? {...initialFlow(s), state: 'first_launch'} : s;
+    return e.type === 'RESTART'
+      ? initialFlow({screeningAvailable: s.screeningAvailable, devModeAvailable: s.devModeAvailable})
+      : s;
   }
 
   switch (e.type) {

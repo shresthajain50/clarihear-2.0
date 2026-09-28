@@ -40,6 +40,10 @@ export default function PowerButton({on, loading = false, onPress, size = 88, ac
       Animated.timing(pulse, {toValue: 1, duration: 200, useNativeDriver: true}).start();
       Animated.timing(glow, {toValue: 0, duration: 400, useNativeDriver: false}).start();
     }
+    return () => {
+      pulse.stopAnimation();
+      glow.stopAnimation();
+    };
   }, [on, glow, pulse]);
 
   // Spinner while loading
@@ -52,6 +56,7 @@ export default function PowerButton({on, loading = false, onPress, size = 88, ac
       spin.stopAnimation();
       spin.setValue(0);
     }
+    return () => spin.stopAnimation();
   }, [loading, spin]);
 
   const rotate = spin.interpolate({inputRange: [0, 1], outputRange: ['0deg', '360deg']});

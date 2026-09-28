@@ -84,7 +84,7 @@ export default function DeveloperScreen({dspProfile, onClose}: Props) {
       return next;
     });
     Audio.developer.setEqBandGain(band, gainDb(gainL), gainDb(gainR));  // dev-only raw EQ; engine clamps
-  }, [audio]);
+  }, []);
 
   // ── Volume slider ─────────────────────────────────────────────
   const onVolumeChange = useCallback((v: number) => {
@@ -96,7 +96,7 @@ export default function DeveloperScreen({dspProfile, onClose}: Props) {
   const onAfcToggle = useCallback((val: boolean) => {
     setAfc(val);
     Audio.developer.setFeedbackSuppression(val);
-  }, [audio]);
+  }, []);
 
   // ── Tab indicator X position ──────────────────────────────────
   const tabX = tabAnim.interpolate({inputRange: [0, 1], outputRange: [0, 120]});

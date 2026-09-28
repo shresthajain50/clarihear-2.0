@@ -43,6 +43,19 @@ export default function ListeningScreen({dsp, onOpenSettings}: Props) {
   const [bypass, setBypass] = useState(false);
   const [reduced, setReduced] = useState(false);
   const lastLimiterCount = useRef(0);
+  const mounted = useRef(true);
+  const onRef = useRef(false);
+  onRef.current = on;
+
+  // Leaving this screen (Settings, etc.) stops audio: nothing may keep the mic live
+  // without the on-screen controls (PRD §46, §52). Mute/bypass/volume re-apply on mount.
+  useEffect(
+    () => () => {
+      mounted.current = false;
+      if (onRef.current) Audio.stopAudio();
+    },
+    [],
+  );
 
   useEffect(() => {
     Audio.applyDspProfile(applyListeningControls(dsp, mode, {clarity: clarity / 2, background: 0, loudness: 0}));
@@ -78,6 +91,10 @@ export default function ListeningScreen({dsp, onOpenSettings}: Props) {
     setStarting(true);
     setError(null);
     const ok = await Audio.startAudio();
+    if (!mounted.current) {
+      if (ok) Audio.stopAudio(); // screen was left mid-start
+      return;
+    }
     setStarting(false);
     setOn(ok);
     if (!ok) {
@@ -125,9 +142,9 @@ export default function ListeningScreen({dsp, onOpenSettings}: Props) {
               <Pressable
                 key={m.id}
                 onPress={() => setMode(m.id)}
-                accessibilityRole="button"
+                accessibilityRole="radio"
                 accessibilityLabel={m.label}
-                accessibilityState={{selected: mode === m.id}}
+                accessibilityState={{checked: mode === m.id}}
                 style={[styles.chip, mode === m.id && styles.chipOn]}>
                 <Text style={[styles.chipText, mode === m.id && styles.chipTextOn]}>{m.label}</Text>
               </Pressable>
@@ -153,12 +170,8 @@ export default function ListeningScreen({dsp, onOpenSettings}: Props) {
         />
 
         <View style={styles.row}>
-          <BigButton label={muted ? 'Unmute' : 'Mute'} active={muted} onPress={() => setMuted(m => !m)} />
-          <BigButton
-            label={bypass ? 'Resume processing' : 'Natural sound'}
-            active={bypass}
-            onPress={() => setBypass(b => !b)}
-          />
+          <Toggle label="Mute" text={muted ? 'Muted' : 'Mute'} on={muted} onPress={() => setMuted(m => !m)} />
+          <Toggle label="Natural sound" text={bypass ? 'Natural sound: on' : 'Natural sound'} on={bypass} onPress={() => setBypass(b => !b)} />
         </View>
 
         <View style={styles.safety} accessible accessibilityLabel="Safe listening enabled. Clarihear limits amplification, but can't guarantee the exact sound level in your ears with these headphones.">
@@ -189,15 +202,15 @@ function Stepper(p: {label: string; value: string; downLabel: string; upLabel: s
   );
 }
 
-function BigButton({label, active, onPress}: {label: string; active: boolean; onPress: () => void}) {
+function Toggle({label, text, on, onPress}: {label: string; text: string; on: boolean; onPress: () => void}) {
   return (
     <Pressable
       onPress={onPress}
-      accessibilityRole="button"
+      accessibilityRole="switch"
       accessibilityLabel={label}
-      accessibilityState={{selected: active}}
-      style={[styles.big, active && styles.bigOn]}>
-      <Text style={styles.bigText}>{label}</Text>
+      accessibilityState={{checked: on}}
+      style={[styles.big, on && styles.bigOn]}>
+      <Text style={styles.bigText}>{text}</Text>
     </Pressable>
   );
 }

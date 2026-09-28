@@ -51,6 +51,12 @@ describe('app flow (PRD §7, §35)', () => {
     expect(appFlow(referred, {type: 'RESTART'}).state).toBe('first_launch');
   });
 
+  it('RESTART is a clean reset: no referral reasons, urgency or profile leak into the new session', () => {
+    const referred = run([{type: 'START'}, {type: 'SAFETY_RESULT', result: assessEligibility({...safe, sudden_change: true})}],
+      initialFlow({devModeAvailable: true}));
+    expect(appFlow(referred, {type: 'RESTART'})).toEqual(initialFlow({devModeAvailable: true}));
+  });
+
   it('listening without a profile is only the flat (no-amplification) profile, and only after safety', () => {
     const s = run([...toSetup, {type: 'SKIP_PROFILE'}]);
     expect(s.state).toBe('listening');
