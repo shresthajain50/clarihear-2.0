@@ -29,6 +29,9 @@ export interface CompressorParams {
   makeupGainDb: number;
 }
 
+/** Platform audio session state (cpp AudioEngine::SessionStatus). */
+export type SessionStatus = 'stopped' | 'running' | 'paused_route_lost' | 'paused_interrupted' | 'no_headphones';
+
 /** The raw global.clarihear JSI host object interface (do not use directly). */
 export interface ClarihearJSI {
   startAudio(): Promise<boolean>;
@@ -40,6 +43,7 @@ export interface ClarihearJSI {
   setBypass(on: boolean): void;
   setMuted(on: boolean): void;
   getLimiterEngagedCount(): number;
+  getSessionStatus(): SessionStatus;
   // Developer mode only (ENGINEERING_SKILL rule 7):
   setEqBandGain(band: number, gainDbLeft: number, gainDbRight: number): void;
   setCompressorParams(params: CompressorParams): void;

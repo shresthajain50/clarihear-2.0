@@ -58,6 +58,7 @@ ClarihearHostObject::getPropertyNames(RT& rt) {
         "setBypass",
         "setMuted",
         "getLimiterEngagedCount",
+        "getSessionStatus",
         "getInputLevel",
         "getOutputLevel",
     };
@@ -129,10 +130,7 @@ Val ClarihearHostObject::get(RT& rt, const Prop& name) {
     if (nameStr == "isRunning") {
         return makeFunction(rt, "isRunning", 0,
             [this](RT&, const Val&, const Val*, size_t) -> Val {
-                // AudioEngine doesn't track running state — platform layer does.
-                // We return false here; platform callers override via startFn.
-                // (Phase 5 UI uses startAudio promise + local state instead.)
-                return Val(false);
+                return Val(_engine->sessionStatus() == SessionStatus::Running);
             });
     }
 
@@ -246,6 +244,18 @@ Val ClarihearHostObject::get(RT& rt, const Prop& name) {
                 if (mute) _engine->setMuted(on);
                 else      _engine->setBypass(on);
                 return Val::undefined();
+            });
+    }
+
+    // ── getSessionStatus() → 'stopped' | 'running' | 'paused_route_lost' | … ──
+    // Set by the platform layer; the UI polls it to show PRD §52 messages.
+    if (nameStr == "getSessionStatus") {
+        return makeFunction(rt, "getSessionStatus", 0,
+            [this](RT& rt, const Val&, const Val*, size_t) -> Val {
+                static const char* const kNames[] = {"stopped", "running", "paused_route_lost",
+                                                     "paused_interrupted", "no_headphones"};
+                const int s = int(_engine->sessionStatus());
+                return String::createFromAscii(rt, (s >= 0 && s < 5) ? kNames[s] : "stopped");
             });
     }
 

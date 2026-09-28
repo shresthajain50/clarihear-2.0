@@ -46,6 +46,17 @@ static constexpr float kEqFrequencies[kEqBands] = {250.f, 500.f, 1000.f, 2000.f,
 static constexpr float kEqQ = 0.7f;
 static constexpr float kHighPassHz = 100.f;
 
+/// Platform-reported audio session state (route / interruption safety, PRD §52).
+/// Paused states force silence inside process(): on headset loss the platform's FIRST
+/// action is one atomic store, so nothing reaches a fallback speaker while it stops.
+enum class SessionStatus : int {
+    Stopped = 0,
+    Running = 1,
+    PausedRouteLost = 2,    ///< headphones disconnected
+    PausedInterrupted = 3,  ///< call / Siri / audio focus lost
+    NoHeadphones = 4,       ///< start refused: no headset-type output
+};
+
 /// Everything the audio thread needs, precomputed on the writer side.
 struct RtParams {
     BiquadCoeffs eqL[kEqBands]{};
@@ -119,6 +130,9 @@ public:
     void setBypass(bool on) noexcept { _bypass.store(on, std::memory_order_relaxed); }
     /// Silence. Wins over everything. 2 ms ramp.
     void setMuted(bool on) noexcept { _muted.store(on, std::memory_order_relaxed); }
+    /// Platform layer only. Paused states silence output (like mute, independent of it).
+    void setSessionStatus(SessionStatus s) noexcept { _session.store(int(s), std::memory_order_relaxed); }
+    SessionStatus sessionStatus() const noexcept { return SessionStatus(_session.load(std::memory_order_relaxed)); }
 
     // ─── Real-time callback ─────────────────────────────────
     /// Interleaved stereo in → out, numFrames frames. in and out may alias.
@@ -150,6 +164,7 @@ private:
     float _muteGain = 1.f, _bypassMix = 0.f;
 
     std::atomic<bool> _muted{false}, _bypass{false};
+    std::atomic<int> _session{int(SessionStatus::Stopped)};
     std::atomic<float> _inputLevelDb{-96.f}, _outputLevelDb{-96.f};
     std::atomic<uint32_t> _limiterEngaged{0};
 };

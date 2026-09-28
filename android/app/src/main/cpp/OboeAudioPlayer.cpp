@@ -158,6 +158,12 @@ bool OboeAudioPlayer::openInputStream() {
 // ============================================================
 bool OboeAudioPlayer::start() {
     if (_running) return true;
+    // Never open a mic → loudspeaker loop (feedback, PRD §17/§52).
+    if (!_headsetConnected.load()) {
+        _dsp.setSessionStatus(SessionStatus::NoHeadphones);
+        LOGW("Refusing to start: no headset-type output connected");
+        return false;
+    }
 
     // Open output first so we know the sample rate before opening input
     if (!openOutputStream()) return false;
@@ -181,7 +187,8 @@ bool OboeAudioPlayer::start() {
     }
 
     _running = true;
-    LOGI("OboeAudioPlayer started — mic→DSP→speaker pipeline active");
+    _dsp.setSessionStatus(SessionStatus::Running);
+    LOGI("OboeAudioPlayer started — mic→DSP→headphones pipeline active");
     return true;
 }
 
@@ -189,8 +196,10 @@ bool OboeAudioPlayer::start() {
 //  stop  —  drain and close both streams
 // ============================================================
 void OboeAudioPlayer::stop() {
-    if (!_running) return;
+    // No early return on !_running: start()'s failure path calls stop() before _running
+    // is set, and the streams it opened must still be closed.
     _running = false;
+    if (_dsp.sessionStatus() == SessionStatus::Running) _dsp.setSessionStatus(SessionStatus::Stopped);
 
     if (_outputStream) {
         _outputStream->requestStop();
@@ -271,34 +280,33 @@ oboe::DataCallbackResult OboeAudioPlayer::onAudioReady(
     return oboe::DataCallbackResult::Continue;
 }
 
-// ============================================================
-//  onErrorAfterClose  —  stream restart after device change
-//  ─────────────────────────────────────────────────────────────
-//  Called when Oboe's internal error recovery has already tried
-//  to restart the stream and failed (e.g. headphones unplugged,
-//  Bluetooth device switched, audio focus stolen).
-//
-//  We restart the entire pipeline cleanly.
-//  Note: this callback fires on a NON-audio thread (safe to allocate).
-// ============================================================
-void OboeAudioPlayer::onErrorAfterClose(
-        oboe::AudioStream * /*stream*/,
-        oboe::Result result) {
-    LOGW("Stream error after close: %s — restarting pipeline",
-         oboe::convertToText(result));
-
-    // Brief pause to let the audio subsystem settle
-    // (safe — we're on a non-real-time thread here)
-    usleep(200'000);  // 200ms
-
-    // Restart cleanly — stop() resets _running so start() re-opens streams
-    bool wasRunning = _running;
-    stop();
-    if (wasRunning) {
-        if (!start()) {
-            LOGE("Failed to restart after error — audio pipeline stopped");
-        }
+// ponytail: _running is a plain bool shared by the JS thread (start/stop) and Oboe's
+// error thread (onErrorAfterClose → stop). Make it atomic + serialise start/stop if
+// device testing shows a race on rapid unplug/replug.
+void OboeAudioPlayer::setHeadsetConnected(bool connected) {
+    _headsetConnected.store(connected);
+    if (!connected && _running) {
+        _dsp.setSessionStatus(SessionStatus::PausedRouteLost);  // silence first (next buffer)
+        stop();
     }
+}
+
+// Fires before Oboe closes the stream (device disconnected, focus lost): silence now.
+bool OboeAudioPlayer::onError(oboe::AudioStream * /*stream*/, oboe::Result result) {
+    if (result == oboe::Result::ErrorDisconnected) _dsp.setSessionStatus(SessionStatus::PausedRouteLost);
+    return false;  // let Oboe close the stream, then onErrorAfterClose runs
+}
+
+// ============================================================
+//  onErrorAfterClose  —  stream died (headphones unplugged, BT switched, focus lost)
+//  Do NOT auto-restart: Oboe's new default device may be the loudspeaker, which with
+//  mic gain is a feedback loop. Stay paused; the user reconnects and taps ON (PRD §52).
+//  Non-audio thread.
+// ============================================================
+void OboeAudioPlayer::onErrorAfterClose(oboe::AudioStream * /*stream*/, oboe::Result result) {
+    LOGW("Stream closed after error: %s — pausing (no auto-restart)", oboe::convertToText(result));
+    if (_dsp.sessionStatus() == SessionStatus::Running) _dsp.setSessionStatus(SessionStatus::PausedRouteLost);
+    stop();
 }
 
 } // namespace clarihear

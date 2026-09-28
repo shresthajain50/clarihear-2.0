@@ -21,6 +21,11 @@ const MODES: {id: ListeningMode; label: string}[] = [
 ];
 const VOLUME_STEPS = 10;
 const CLARITY_LABELS = ['Softer', 'A little softer', 'Balanced', 'A little crisper', 'Crisper'];
+const PAUSED_COPY: Partial<Record<ReturnType<typeof Audio.getSessionStatus>, string>> = {
+  paused_route_lost: 'Your headphones were disconnected. Listening assistance is paused.', // PRD §52
+  paused_interrupted: 'Listening assistance was paused by a call or another app. Tap ON to resume.',
+};
+const NO_HEADPHONES = "Connect headphones to start listening. Clarihear doesn't use the phone speaker.";
 
 interface Props {
   dsp: DspProfile;
@@ -46,10 +51,17 @@ export default function ListeningScreen({dsp, onOpenSettings}: Props) {
   useEffect(() => Audio.setMuted(muted), [muted]);
   useEffect(() => Audio.setBypass(bypass), [bypass]);
 
-  // PRD §52: tell the user when the limiter had to step in.
+  // PRD §52: surface limiter activity and platform pauses (headset lost, interruption).
+  // The native layer has already silenced and stopped audio; the UI must not claim it's on.
   useEffect(() => {
     if (!on) return;
     const id = setInterval(() => {
+      const paused = PAUSED_COPY[Audio.getSessionStatus()];
+      if (paused) {
+        setOn(false);
+        setError(paused);
+        return;
+      }
       const n = Audio.getLimiterEngagedCount();
       setReduced(n > lastLimiterCount.current);
       lastLimiterCount.current = n;
@@ -68,7 +80,13 @@ export default function ListeningScreen({dsp, onOpenSettings}: Props) {
     const ok = await Audio.startAudio();
     setStarting(false);
     setOn(ok);
-    if (!ok) setError("Clarihear couldn't start live listening. Check your headphones and try again.");
+    if (!ok) {
+      setError(
+        Audio.getSessionStatus() === 'no_headphones'
+          ? NO_HEADPHONES
+          : "Clarihear couldn't start live listening. Check your headphones and try again.",
+      );
+    }
   }, [on]);
 
   return (

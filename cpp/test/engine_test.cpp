@@ -167,6 +167,30 @@ void test_mute_immediate_and_wins() {
     EXPECT_TRUE(maxStep(muted) <= bound, "Engine: mute ramps over ~2 ms (no click)");
 }
 
+void test_session_pause_silences() {
+    // Route loss / interruption / no headphones: the platform flags it and output must be
+    // silent within one buffer, even if the user never pressed mute (PRD §52).
+    for (auto st : {SessionStatus::PausedRouteLost, SessionStatus::PausedInterrupted, SessionStatus::NoHeadphones}) {
+        AudioEngine e;
+        auto in = stereo(noise(9600, 0.5f));
+        run(e, in);
+        e.setSessionStatus(st);
+        auto out = run(e, in);
+        bool silent = true;
+        for (size_t i = 2 * kBlock; i < out.size(); ++i) silent &= (out[i] == 0.f);
+        EXPECT_TRUE(silent && e.sessionStatus() == st, "Engine: paused session status forces silence within one buffer");
+    }
+    AudioEngine e;
+    e.setSessionStatus(SessionStatus::PausedRouteLost);
+    run(e, stereo(noise(4800, 0.5f)));
+    e.setSessionStatus(SessionStatus::Running);
+    auto back = run(e, stereo(noise(4800, 0.5f)));
+    AudioEngine ref;  // same input, never paused
+    run(ref, stereo(noise(4800, 0.5f)));
+    auto want = run(ref, stereo(noise(4800, 0.5f)));
+    EXPECT_TRUE(peakAbs(back) > 0.5f * peakAbs(want), "Engine: audio returns only when the platform reports Running again");
+}
+
 void test_volume_zero_and_click_free() {
     AudioEngine e;
     e.setMasterVolume(0.f);
@@ -267,6 +291,7 @@ int main() {
     test_band_gain_applied();
     test_bypass_bit_exact();
     test_mute_immediate_and_wins();
+    test_session_pause_silences();
     test_volume_zero_and_click_free();
     test_eq_change_click_free();
     test_non_finite();

@@ -166,7 +166,8 @@ void AudioEngine::process(const float* input, float* output, int numFrames) noex
     }
     if (_mailbox.read(_rt)) applyRt(/*ramp=*/true);
 
-    const float muteTarget   = _muted.load(std::memory_order_relaxed) ? 0.f : 1.f;
+    const bool paused = _session.load(std::memory_order_relaxed) >= int(SessionStatus::PausedRouteLost);
+    const float muteTarget   = (_muted.load(std::memory_order_relaxed) || paused) ? 0.f : 1.f;
     const float bypassTarget = _bypass.load(std::memory_order_relaxed) ? 1.f : 0.f;
     float inPeak = 0.f, outPeak = 0.f;
     uint32_t limited = 0;

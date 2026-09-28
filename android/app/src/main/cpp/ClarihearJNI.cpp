@@ -106,6 +106,10 @@ JNI_FUNC(nativeSetBandGains)(JNIEnv* env, jobject /*thiz*/,
     if (right) env->ReleaseFloatArrayElements(rightGains, right, JNI_ABORT);
 }
 
+JNI_FUNC(nativeSetHeadsetConnected)(JNIEnv* /*env*/, jobject /*thiz*/, jboolean connected) -> void {
+    if (gPlayer) gPlayer->setHeadsetConnected(connected == JNI_TRUE);
+}
+
 JNI_FUNC(nativeSetBypass)(JNIEnv* /*env*/, jobject /*thiz*/, jboolean on) -> void {
     if (gPlayer) gPlayer->dspEngine().setBypass(on == JNI_TRUE);
 }

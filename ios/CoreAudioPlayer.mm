@@ -120,13 +120,12 @@ static constexpr int kCoreAudioMaxFrames = 1024;
     //                    Essential: we want the raw mic signal for our C++ DSP
     // .allowBluetooth  — Bluetooth HFP (hearing aid / phone headsets)
     // .allowBluetoothA2DP — High-quality A2DP while recording
-    // .defaultToSpeaker — don't silence output if no headphones
+    // NO .defaultToSpeaker and NO AirPlay: mic → gain → loudspeaker is an acoustic
+    // feedback loop (PRD §17, §52). Start is refused without a headset-type output.
     [session setCategory:AVAudioSessionCategoryPlayAndRecord
                     mode:AVAudioSessionModeMeasurement
                  options:(AVAudioSessionCategoryOptionAllowBluetooth          |
-                          AVAudioSessionCategoryOptionAllowBluetoothA2DP      |
-                          AVAudioSessionCategoryOptionAllowAirPlay             |
-                          AVAudioSessionCategoryOptionDefaultToSpeaker)
+                          AVAudioSessionCategoryOptionAllowBluetoothA2DP)
                    error:&err];
     if (err) { os_log_error(kLog, "setCategory: %{public}@", err); return; }
 
@@ -200,8 +199,27 @@ static constexpr int kCoreAudioMaxFrames = 1024;
     }];
 }
 
+/// True only if the current output is a headset-type port (never the speaker/receiver).
+static BOOL CHHasHeadsetOutput(AVAudioSessionRouteDescription *route) {
+    NSSet<AVAudioSessionPort> *ok = [NSSet setWithObjects:AVAudioSessionPortHeadphones,
+                                     AVAudioSessionPortBluetoothA2DP, AVAudioSessionPortBluetoothHFP,
+                                     AVAudioSessionPortBluetoothLE, AVAudioSessionPortUSBAudio, nil];
+    for (AVAudioSessionPortDescription *out in route.outputs)
+        if (![ok containsObject:out.portType]) return NO;
+    return route.outputs.count > 0;
+}
+
 - (void)_startEngineWithCompletion:(void(^)(BOOL, NSError * _Nullable))completion {
     NSError *err = nil;
+
+    if (!CHHasHeadsetOutput([AVAudioSession sharedInstance].currentRoute)) {
+        _dspEngine->setSessionStatus(clarihear::SessionStatus::NoHeadphones);
+        os_log_error(kLog, "Refusing to start: no headphones on the current route");
+        NSError *e = [NSError errorWithDomain:@"com.clarihear" code:2
+                                     userInfo:@{NSLocalizedDescriptionKey: @"No headphones connected"}];
+        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, e); });
+        return;
+    }
 
     // ── Install the microphone tap ────────────────────────────────────
     // installTap() fires our block on the CoreAudio real-time thread
@@ -235,6 +253,7 @@ static constexpr int kCoreAudioMaxFrames = 1024;
 
     [_playerNode play];
     self.isRunning = YES;
+    _dspEngine->setSessionStatus(clarihear::SessionStatus::Running);
     os_log_info(kLog, "CoreAudioPlayer started — mic→DSP→speaker pipeline live");
 
     if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(YES, nil); });
@@ -323,6 +342,9 @@ static constexpr int kCoreAudioMaxFrames = 1024;
 
     [_engine stop];
     self.isRunning = NO;
+    // Keep a paused reason (route lost / interrupted) so JS can show why; plain stop → Stopped.
+    if (_dspEngine->sessionStatus() == clarihear::SessionStatus::Running)
+        _dspEngine->setSessionStatus(clarihear::SessionStatus::Stopped);
     os_log_info(kLog, "CoreAudioPlayer stopped");
 }
 
@@ -346,18 +368,13 @@ static constexpr int kCoreAudioMaxFrames = 1024;
     AVAudioSessionInterruptionType type =
         [note.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue];
 
-    if (type == AVAudioSessionInterruptionTypeBegan) {
-        os_log_info(kLog, "Audio interruption began — stopping");
+    if (type == AVAudioSessionInterruptionTypeBegan && self.isRunning) {
+        os_log_info(kLog, "Audio interruption began — pausing");
+        _dspEngine->setSessionStatus(clarihear::SessionStatus::PausedInterrupted);  // silence first
         [self stop];
-    } else {
-        // Interruption ended — check if we should resume
-        AVAudioSessionInterruptionOptions opts =
-            [note.userInfo[AVAudioSessionInterruptionOptionKey] unsignedIntegerValue];
-        if (opts & AVAudioSessionInterruptionOptionShouldResume) {
-            os_log_info(kLog, "Audio interruption ended — restarting");
-            [self startWithCompletion:nil];
-        }
     }
+    // Interruption ended: do NOT auto-resume. The route may have changed during the call;
+    // the user restarts with one tap (PRD §52: never silently continue in an unsafe state).
 }
 
 /// Called when headphones are plugged/unplugged or Bluetooth switches.
@@ -367,15 +384,14 @@ static constexpr int kCoreAudioMaxFrames = 1024;
 
     os_log_info(kLog, "Audio route changed: reason=%lu", (unsigned long)reason);
 
-    // On headphone disconnect, the session automatically switches to speaker.
-    // We just need to restart the engine to pick up the new route.
-    if (reason == AVAudioSessionRouteChangeReasonOldDeviceUnavailable) {
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-            if (self.isRunning) {
-                [self stop];
-                [self startWithCompletion:nil];
-            }
-        });
+    // Headphones gone: iOS reroutes to the receiver/speaker. Silence FIRST (one atomic store,
+    // effective next buffer), then stop. Never restart on the fallback route — that would be
+    // mic → gain → loudspeaker feedback. The user reconnects and taps ON again.
+    const BOOL lost = reason == AVAudioSessionRouteChangeReasonOldDeviceUnavailable ||
+                      !CHHasHeadsetOutput([AVAudioSession sharedInstance].currentRoute);
+    if (lost && self.isRunning) {
+        _dspEngine->setSessionStatus(clarihear::SessionStatus::PausedRouteLost);
+        dispatch_async(dispatch_get_main_queue(), ^{ [self stop]; });
     }
 }
 

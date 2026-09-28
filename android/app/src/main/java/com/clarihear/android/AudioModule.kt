@@ -3,6 +3,11 @@ package com.clarihear.android
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.Handler
+import android.os.Looper
 import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.ReactContext
 
@@ -38,7 +43,36 @@ class AudioModule(private val context: Context) {
          *       AudioModule(ctx).installJSI(rtPtr)
          *   }
          */
+        /** Outputs that are safe for mic→DSP→ear. Never the built-in speaker/earpiece (feedback). */
+        private val HEADSET_TYPES = setOf(
+            AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE,
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            AudioDeviceInfo.TYPE_BLE_HEADSET,
+        )
+        @Volatile private var headsetMonitorStarted = false
+
+        /**
+         * Oboe can't see device types, so Kotlin tells native whether a headset-type output
+         * exists. Native refuses to start without one, and silences + stops the moment the
+         * last one disappears (PRD §52). Registered once.
+         */
+        fun startHeadsetMonitor(context: Context) {
+            if (headsetMonitorStarted) return
+            headsetMonitorStarted = true
+            val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val module = AudioModule(context)
+            fun push() = module.nativeSetHeadsetConnected(
+                am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type in HEADSET_TYPES })
+            am.registerAudioDeviceCallback(object : AudioDeviceCallback() {
+                override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) = push()
+                override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) = push()
+            }, Handler(Looper.getMainLooper()))
+            push()
+        }
+
         fun installFromContext(reactContext: ReactContext) {
+            startHeadsetMonitor(reactContext.applicationContext)
             try {
                 val catalystInstance = reactContext.catalystInstance
                     ?: run { android.util.Log.e("AudioModule", "No CatalystInstance"); return }
@@ -113,6 +147,7 @@ class AudioModule(private val context: Context) {
     private external fun nativeSetEqBandGain(band: Int, gainL: Float, gainR: Float)
     private external fun nativeSetBandGains(leftGains: FloatArray, rightGains: FloatArray)
     private external fun nativeSetBypass(on: Boolean)
+    private external fun nativeSetHeadsetConnected(connected: Boolean)
     private external fun nativeSetMuted(on: Boolean)
     private external fun nativeSetMasterVolume(linear: Float)
     private external fun nativeSetFeedbackSuppression(enabled: Boolean)

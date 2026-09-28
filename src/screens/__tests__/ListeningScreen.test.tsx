@@ -13,6 +13,7 @@ jest.mock('../../native/ClarihearAudio', () => ({
   setBypass: jest.fn(),
   setMuted: jest.fn(),
   getLimiterEngagedCount: jest.fn(() => 0),
+  getSessionStatus: jest.fn(() => 'running'),
   getInputLevel: jest.fn(() => -96),
   getOutputLevel: jest.fn(() => -96),
   isJSIAvailable: jest.fn(() => true),
@@ -85,6 +86,26 @@ describe('ListeningScreen (PRD §16)', () => {
     for (const m of ['Everyday', 'Conversation', 'Quiet']) expect(screen.getByRole('button', {name: m})).toBeTruthy();
     fireEvent.press(screen.getByRole('button', {name: 'Conversation'}));
     expect(A.applyDspProfile.mock.calls.at(-1)![0].mode).toBe('conversation');
+  });
+
+  it('on headset disconnect: shows the PRD copy and switches to OFF (no silent continue)', async () => {
+    jest.useFakeTimers();
+    render(<ListeningScreen dsp={dsp} onOpenSettings={() => {}} />);
+    await act(async () => fireEvent.press(screen.getByLabelText('Turn listening assistance on')));
+    A.getSessionStatus.mockReturnValue('paused_route_lost');
+    await act(async () => jest.advanceTimersByTime(1100));
+    expect(screen.getByText('Your headphones were disconnected. Listening assistance is paused.')).toBeTruthy();
+    expect(screen.getByLabelText('Turn listening assistance on')).toBeTruthy();
+    A.getSessionStatus.mockReturnValue('running');
+    jest.useRealTimers();
+  });
+
+  it('explains that it will not start without headphones', async () => {
+    A.startAudio.mockResolvedValueOnce(false);
+    A.getSessionStatus.mockReturnValueOnce('no_headphones');
+    render(<ListeningScreen dsp={dsp} onOpenSettings={() => {}} />);
+    await act(async () => fireEvent.press(screen.getByLabelText('Turn listening assistance on')));
+    expect(screen.getByText(/Connect headphones to start listening/)).toBeTruthy();
   });
 
   it('shows the PRD failure copy when audio cannot start', async () => {

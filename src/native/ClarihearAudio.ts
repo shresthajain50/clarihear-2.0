@@ -12,7 +12,7 @@
 // ============================================================
 
 import {NativeModules} from 'react-native';
-import type {CompressorParams, EqBand} from './types';
+import type {CompressorParams, EqBand, SessionStatus} from './types';
 import {gainDb, type DspProfile, type GainDb} from '../hearing/types';
 
 export const EQ_FREQUENCIES: Record<EqBand, number> = {0: 250, 1: 500, 2: 1000, 3: 2000, 4: 4000, 5: 8000};
@@ -71,6 +71,11 @@ export function setMuted(on: boolean): void {
 /** Samples the Level-1 limiter has reduced; a rising count drives the PRD §52 message. */
 export function getLimiterEngagedCount(): number {
   return jsi ? jsi.getLimiterEngagedCount() : 0;
+}
+
+/** Why audio is (not) running. Paused states mean the platform silenced and stopped it. */
+export function getSessionStatus(): SessionStatus {
+  return jsi ? jsi.getSessionStatus() : 'stopped';
 }
 
 export function getInputLevel(): number {

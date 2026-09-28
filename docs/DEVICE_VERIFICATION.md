@@ -70,3 +70,32 @@ rendering, TalkBack/VoiceOver and gestures have **not** been checked on a device
       shows off.
 - [ ] Clap near the mic at max clarity/volume: "Clarihear reduced amplification…"
       appears within about a second.
+
+## Route change / interruption / headset disconnect (#17)
+
+What ran headlessly: the engine's `SessionStatus` gate (paused → silent within one
+buffer; audio returns only on `Running`), the JSI syntax check, and the UI's
+reaction to a paused status (jest). **None of the iOS/Android route code has run.**
+It is the highest-risk unverified code in the repo, so test it first.
+
+Both platforms: before this change, unplugging the headset **auto-restarted audio
+on the phone speaker** (mic → gain → speaker: feedback howl). Now:
+
+- [ ] Start with **no headphones**: ON is refused, with "Connect headphones to start
+      listening…". No sound comes from the speaker at any point.
+- [ ] Listening on wired headphones, then **unplug**: silence immediately (nothing
+      from the speaker, not even a blip), and within about 1 s the UI shows "Your
+      headphones were disconnected. Listening assistance is paused." with ON off.
+- [ ] Re-plug and tap ON: it resumes. The UI mute state and the engine agree (if
+      Mute was on before unplugging, it's still on).
+- [ ] Bluetooth headset: connect, start, then switch the BT device off. Same result as unplugging.
+- [ ] iOS: incoming call while listening: pauses with the interruption copy, and
+      does **not** auto-resume after the call.
+- [ ] Android: another app takes audio focus or the stream errors: pauses, with no
+      auto-restart (`onErrorAfterClose`).
+- [ ] Rapid unplug/replug ×10 on Android: no crash or stuck state. `_running` is a
+      plain bool shared across threads (see the `ponytail:` note in `OboeAudioPlayer.cpp`).
+- [ ] Android: a failed start (e.g. mic denied) no longer leaks open streams; check
+      that a second start works.
+- [ ] Kotlin: `AudioModule.installFromContext` registers the headset monitor once.
+      A USB-C DAC and a BLE headset (API 31+) count as headsets.

@@ -6,6 +6,7 @@
 #pragma once
 
 #include <oboe/Oboe.h>
+#include <atomic>
 #include "AudioEngine.h"   // shared C++17 DSP engine
 
 namespace clarihear {
@@ -30,6 +31,10 @@ public:
 
     bool isRunning() const noexcept { return _running; }
 
+    /// Fed by Kotlin's AudioDeviceCallback (Oboe can't see device types). Any thread.
+    /// Losing the last headset while running silences immediately, then stops.
+    void setHeadsetConnected(bool connected);
+
     /// Direct access to the shared DSP engine (used by JSI bindings).
     AudioEngine& dspEngine() noexcept { return _dsp; }
 
@@ -41,6 +46,7 @@ public:
                                           int32_t            numFrames) override;
 
     // ── oboe::AudioStreamErrorCallback ────────────────────────────────
+    bool onError(oboe::AudioStream *stream, oboe::Result result) override;
     void onErrorAfterClose(oboe::AudioStream *stream, oboe::Result result) override;
 
 private:
@@ -50,6 +56,7 @@ private:
     std::shared_ptr<oboe::AudioStream> _outputStream;  // speaker
 
     bool _running = false;
+    std::atomic<bool> _headsetConnected{false};
 
     // Intermediate buffer: sized to hold one callback's worth of stereo Float32
     // Stack-allocated to avoid heap allocation in the audio thread.
