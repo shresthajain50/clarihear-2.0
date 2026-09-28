@@ -16,26 +16,37 @@ import {Colors, Fonts, Radius, Spacing} from '../theme';
 
 const {width: SW} = Dimensions.get('window');
 
+// Copy from PRD §8. No performance, latency or accuracy claims: none has been measured,
+// and the product must never imply diagnosis or clinical fitting.
 const SLIDES = [
   {
-    emoji:    '🎙',
-    title:    'Hear Every Word',
-    subtitle: 'ClariHear amplifies and clarifies speech in real-time using advanced DSP — running entirely on your device.',
+    emoji:    '👂',
+    title:    'Hear what matters.',
+    subtitle: 'Clarihear creates a personalized listening experience based on how you hear.',
     accent:   Colors.primary,
   },
   {
-    emoji:    '🎛',
-    title:    'Tuned to Your Hearing',
-    subtitle: 'Import your audiogram or run a quick screening. The 6-band EQ adapts to your exact hearing thresholds, per ear.',
+    emoji:    '✓',
+    title:    'Check',
+    subtitle: 'Understand your hearing profile.',
     accent:   Colors.secondary,
   },
   {
-    emoji:    '⚡',
-    title:    'Under 10ms Latency',
-    subtitle: 'No echo, no delay. The mic-to-speaker path is < 10ms — so you hear the world naturally, just clearer.',
+    emoji:    '◎',
+    title:    'Personalize',
+    subtitle: 'Create a listening profile for your needs.',
+    accent:   Colors.primary,
+  },
+  {
+    emoji:    '♪',
+    title:    'Assist',
+    subtitle: 'Use real-time sound processing to make conversations easier to follow.',
     accent:   Colors.success,
   },
 ];
+
+export const ONBOARDING_FOOTER =
+  'Clarihear is a screening and hearing-assistance tool. It does not replace a medical hearing evaluation.';
 
 interface Props {
   onComplete: () => void;
@@ -92,6 +103,8 @@ export default function OnboardingScreen({onComplete}: Props) {
 
       {/* Bottom controls */}
       <View style={styles.bottom}>
+        <Text style={styles.footer}>{ONBOARDING_FOOTER}</Text>
+
         {/* Dot indicators */}
         <View style={styles.dots}>
           {SLIDES.map((_, i) => {
@@ -108,11 +121,13 @@ export default function OnboardingScreen({onComplete}: Props) {
         {/* CTA */}
         {page < SLIDES.length - 1 ? (
           <View style={styles.navRow}>
-            <Pressable onPress={onComplete} style={styles.skipBtn}>
+            <Pressable onPress={onComplete} accessibilityRole="button" accessibilityLabel="Skip introduction" style={styles.skipBtn}>
               <Text style={styles.skipText}>Skip</Text>
             </Pressable>
             <Pressable
               onPress={() => goTo(page + 1)}
+              accessibilityRole="button"
+              accessibilityLabel="Next"
               style={[styles.nextBtn, {backgroundColor: slide.accent}]}>
               <Text style={styles.nextText}>Next →</Text>
             </Pressable>
@@ -120,8 +135,10 @@ export default function OnboardingScreen({onComplete}: Props) {
         ) : (
           <Pressable
             onPress={onComplete}
+            accessibilityRole="button"
+            accessibilityLabel="Start hearing check"
             style={({pressed}) => [styles.startBtn, {opacity: pressed ? 0.85 : 1}]}>
-            <Text style={styles.startText}>Get Started  →</Text>
+            <Text style={styles.startText}>Start hearing check</Text>
           </Pressable>
         )}
       </View>
@@ -156,6 +173,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 34,
   },
+  footer: {color: Colors.textSecondary, fontSize: 15, textAlign: 'center', paddingHorizontal: 24, marginBottom: 12},
   slideSubtitle: {
     fontSize: Fonts.sizes.base,
     fontFamily: Fonts.regular,
