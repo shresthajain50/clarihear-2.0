@@ -17,19 +17,22 @@
 
 namespace clarihear {
 
-/// Parameters exposed to the UI via JSI (all in linear or dB as noted)
+/// Compressor parameters.
+/// DEFAULTS ARE ENGINEERING PLACEHOLDERS — gentle, uncalibrated values
+/// chosen so the compressor does little harm. They are NOT a clinical
+/// or prescriptive WDRC fitting (PRD §6 issue 5, §22). AudioEngine
+/// clamps every field to a gentle range before use.
 struct CompressorParams {
     float thresholdDb  = -40.f;  ///< Level above which gain reduction starts (dBFS)
-    float ratio        =   4.f;  ///< Compression ratio  (e.g. 4 → 4:1)
+    float ratio        =   2.f;  ///< Compression ratio  (e.g. 2 → 2:1)
     float kneeDb       =   6.f;  ///< Soft-knee width in dB
     float attackMs     =   5.f;  ///< Gain reduction attack time in milliseconds
     float releaseMs    = 100.f;  ///< Gain recovery release time in milliseconds
-    float makeupGainDb =  20.f;  ///< Make-up gain applied after compression (dB)
+    float makeupGainDb =   0.f;  ///< Make-up gain (dB); counts toward limits::kMaxTotalGainDb
 };
 
 // ============================================================
-//  Compressor — feed-forward RMS level detector + gain smoother
-//  Phase 2 will implement process(); this stub shows the full API.
+//  Compressor — feed-forward envelope detector + gain smoother
 // ============================================================
 class Compressor {
 public:
@@ -38,7 +41,8 @@ public:
         setParams(_params);
     }
 
-    /// Apply new parameters (safe to call from any thread).
+    /// Apply new parameters. Audio thread only (AudioEngine calls it after
+    /// reading its parameter mailbox) — not safe to call concurrently with process().
     void setParams(const CompressorParams& p) noexcept;
 
     /// Reset envelope state (call when audio stream starts/stops).

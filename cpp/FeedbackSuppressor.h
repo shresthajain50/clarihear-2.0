@@ -14,8 +14,15 @@
 //
 //  STRICT RULE: No heap allocation in process().
 //  Buffer is stack/pre-allocated with a fixed max size.
+//
+//  PROTOTYPE ONLY (PRD §6 issue 3, §24). This is NOT adaptive
+//  feedback cancellation: subtracting a fixed-delay copy of the
+//  input is a comb filter on the wanted signal. It is therefore
+//  DISABLED by default and may only be enabled from developer mode
+//  for offline experiments. Never market it as feedback cancellation.
 // ============================================================
 
+#include <atomic>
 #include <cstring>
 #include <array>
 #include <cstdint>
@@ -37,13 +44,13 @@ public:
     /// Can be called from any thread; applied on next audio callback.
     void setDelayMs(float ms) noexcept {
         int frames = static_cast<int>((ms / 1000.f) * _sampleRate);
-        _delaySamples = (frames < 1) ? 1
-                      : (frames > kMaxDelayFrames) ? kMaxDelayFrames
-                      : frames;
+        _delaySamples.store((frames < 1) ? 1
+                          : (frames >= kMaxDelayFrames) ? kMaxDelayFrames - 1
+                          : frames, std::memory_order_relaxed);
     }
 
-    /// Enable / disable suppression without resetting state.
-    void setEnabled(bool enabled) noexcept { _enabled = enabled; }
+    /// Enable / disable suppression without resetting state. Any thread.
+    void setEnabled(bool enabled) noexcept { _enabled.store(enabled, std::memory_order_relaxed); }
 
     /// Reset delay line and all internal state.
     void reset() noexcept {
@@ -54,14 +61,14 @@ public:
     /// Process one sample.
     /// Returns the input with the estimated feedback component subtracted.
     inline float process(float x) noexcept {
-        if (!_enabled) return x;
+        if (!_enabled.load(std::memory_order_relaxed)) return x;
 
         // Write current sample into the delay line
         _buffer[_writeIndex] = x;
 
         // Read the delayed sample (this approximates the loudspeaker signal
         // heard by the microphone after travelling through the air gap)
-        int readIndex = _writeIndex - _delaySamples;
+        int readIndex = _writeIndex - _delaySamples.load(std::memory_order_relaxed);
         if (readIndex < 0) readIndex += kMaxDelayFrames;
         float feedbackEst = _buffer[readIndex];
 
@@ -75,9 +82,9 @@ public:
 private:
     float _sampleRate;
     std::array<float, kMaxDelayFrames> _buffer{};
-    int   _writeIndex   = 0;
-    int   _delaySamples = 240;  // 5ms default
-    bool  _enabled      = true;
+    int               _writeIndex   = 0;
+    std::atomic<int>  _delaySamples{240};    // 5ms default
+    std::atomic<bool> _enabled{false};       // prototype — off unless developer mode enables it
 };
 
 } // namespace clarihear

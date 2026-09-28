@@ -88,3 +88,7 @@ GoogleService-Info.plist     # same — exclude if it contains sensitive data
 # ── Test artefacts ────────────────────────────────────────────
 coverage/
 /tmp/dsp_test*
+
+# Claude Code session logs (not project artifacts)
+.claude-session-*.json
+.claude-session-*.log

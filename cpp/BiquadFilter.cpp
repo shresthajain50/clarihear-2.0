@@ -154,4 +154,18 @@ BiquadCoeffs makeBiquadCoeffs(BiquadType type,
     return c;
 }
 
+// |H(e^jw)| = |b0 + b1 z^-1 + b2 z^-2| / |1 + a1 z^-1 + a2 z^-2|, z = e^jw
+float biquadMagnitudeDb(const BiquadCoeffs& c, float sampleRate, float freq) noexcept {
+    const float w = 2.f * static_cast<float>(M_PI) * freq / sampleRate;
+    const float c1 = std::cos(w), s1 = std::sin(w);
+    const float c2 = std::cos(2.f * w), s2 = std::sin(2.f * w);
+    const float nr = c.b0 + c.b1 * c1 + c.b2 * c2;
+    const float ni = -(c.b1 * s1 + c.b2 * s2);
+    const float dr = 1.f + c.a1 * c1 + c.a2 * c2;
+    const float di = -(c.a1 * s1 + c.a2 * s2);
+    const float num = nr * nr + ni * ni;
+    const float den = dr * dr + di * di;
+    return 10.f * std::log10((num > 1e-20f ? num : 1e-20f) / (den > 1e-20f ? den : 1e-20f));
+}
+
 } // namespace clarihear
