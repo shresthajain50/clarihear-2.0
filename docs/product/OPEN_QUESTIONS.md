@@ -192,3 +192,19 @@ still gets at most +20 dB, so as not to over-refer the core user group.
 **Needs:** audiologist view on whether an isolated low-frequency (250 Hz)
 loss should refer at a lower level, since it is a possible conductive/Ménière's
 flag.
+
+---
+
+## Q7 — Urgent wording for sudden hearing change
+
+**Context:** PRD §9 gives one referral message for every red flag. Sudden
+hearing loss is treated as time-critical in clinical guidance (prompt medical
+assessment), but the PRD has no urgency copy.
+
+**Default:** when `sudden_change` is flagged, the referral also shows
+`URGENT_MESSAGE` ("If your hearing changed suddenly, please seek medical care
+as soon as possible."), and `urgent: true` is set (`src/hearing/eligibility.ts`).
+No other red flag is marked urgent.
+
+**Needs:** clinical and regulatory review of the wording, and of whether
+pain/drainage or vertigo should also be urgent.
