@@ -130,3 +130,48 @@ of fitting when either of these holds:
 On referral the app shows the PRD §9 copy and applies no gain.
 
 **Needs:** audiologist sign-off on both cut-offs.
+
+---
+
+## Q1 — addendum: provisional protocol is De Sousa antiphasic (2026-09-28)
+
+**Context:** research ticket #8 (`research/protocols/din-protocol-selection.md`).
+The original Q1 default (24 triplets, 2 dB steps, SRT = mean of 5–24) doesn't
+match any published protocol. With the antiphasic SRTs normal listeners reach
+(about −16 to −18 dB SNR), a 0 dB start with fixed 2 dB steps biases the SRT
+by about 1.3 dB (see `research/protocols/din_staircase_sim.py`).
+
+**Default** (replaces the original Q1 default): the De Sousa et al. 2020/2022
+antiphasic smartphone procedure (Ear Hear 41:442, 43:1037, the hearZA /
+hearWHO lineage). 23 whole-triplet-scored triplets drawn from 120, no scored
+practice, start at 0 dB SNR. The first 3 steps are −4 dB after a correct
+response and +2 dB after a wrong one, then ±2 dB 1-up/1-down. SRT = mean SNR
+of the last 19 presented triplets (5–23), with no virtual 24th. Speech-shaped
+stationary noise. The noise level is fixed below 0 dB SNR and the speech
+level fixed at or above it. Stereo output must be confirmed, because antiphasic
+presentation breaks on mono downmix. Classification stays `'unvalidated'`: the
+published cut-offs (−15.7 / −13.7 dB) belong to the South African English
+recordings and population, and don't transfer to other stimuli.
+
+**Needs:** (a) confirm with the authors or hearX whether the virtual 24th
+trial is excluded (≤ 0.2 dB effect); (b) the stimuli decision (ticket #10 /
+Q6): no validated English DIN recording set has an open licence.
+
+---
+
+## Q6 — DIN stimuli source (ticket #10)
+
+**Context:** No validated English DIN recordings are openly licensed. The SA
+English and US English (Cincinnati) sets are commercial via hearX Group.
+Watson's US set is owned by Communication Disorders Technology. The Dutch
+Smits set is shared by Amsterdam UMC on request. Recording our own speaker
+means redoing digit homogenisation, norms, and validation against audiograms,
+per accent.
+
+**Default:** no stimuli ship. The engine is protocol- and stimulus-agnostic
+and always reports `classification: 'unvalidated'`. The app must not present
+DIN results as pass/refer until a licensed or validated stimulus set and its
+matching cut-offs are adopted.
+
+**Needs:** a business decision (licence from hearX vs record and validate
+in-house) and a named owner for stimulus level calibration.
