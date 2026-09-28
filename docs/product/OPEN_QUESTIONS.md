@@ -229,3 +229,30 @@ and delete removes the key.
 
 **Needs:** confirmation of the library, plus a privacy decision on whether
 export should strip `id`.
+
+---
+
+## Q9 — Listening modes and simple controls → DSP (ticket #12)
+
+**Context:** PRD §15–16 names Everyday / Conversation / Quiet plus Clarity,
+Background, Loudness and Volume, with no numbers. PRD §21 requires small,
+bounded changes only.
+
+**Default** (`src/hearing/controls.ts`, `CONTROLS_VERSION =
+'clarihear-controls-0.1.0'`). All offsets are relative to the *fitted* gains.
+The sum is clamped to **±6 dB per band** (Q3), then to the Level-2 ceiling
+(the engine also bounds the combined response):
+- **Clarity** (−1 … +1): high-frequency tilt of ±4 dB. The weights across
+  250/500/1k/2k/4k/8k are 0/0/0/0.5/1/1.
+- **Background** (−1 = less … +1 = more): low-frequency gain of ±6 dB, with
+  weights 1/1/0.5/0/0/0. This is a classical noise-program approach, used
+  instead of a no-op control until noise reduction exists.
+- **Loudness** (0 … 1): +0 … +4 dB broadband.
+- **Volume** is separate: output attenuation only, 0 … 1 linear.
+- **Modes** add a bias to the controls:
+  - Everyday: neutral, WDRC 2:1.
+  - Conversation: clarity +0.5 and background −0.5, WDRC 2:1.
+  - Quiet: neutral, gentler WDRC 1.5:1.
+
+**Needs:** audiologist/UX review of the magnitudes, and a speech-in-noise check
+(M6) that Conversation actually helps.
