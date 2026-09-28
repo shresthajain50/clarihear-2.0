@@ -54,7 +54,10 @@ ClarihearHostObject::getPropertyNames(RT& rt) {
         "setEqBandGain",
         "setCompressorParams",
         "setFeedbackSuppression",
-        "applyAudiogram",
+        "setBandGains",
+        "setBypass",
+        "setMuted",
+        "getLimiterEngagedCount",
         "getInputLevel",
         "getOutputLevel",
     };
@@ -156,7 +159,10 @@ Val ClarihearHostObject::get(RT& rt, const Prop& name) {
     if (nameStr == "setEqBandGain") {
         return makeFunction(rt, "setEqBandGain", 3,
             [this](RT&, const Val&, const Val* args, size_t count) -> Val {
-                if (count < 3) return Val::undefined();
+                // Type-check first: asNumber() throws on non-numbers, and Android builds
+                // with -fno-exceptions, so a bad JS call would otherwise abort the app.
+                if (count < 3 || !args[0].isNumber() || !args[1].isNumber() || !args[2].isNumber())
+                    return Val::undefined();
                 const int   band  = static_cast<int>(args[0].asNumber());
                 const float gainL = static_cast<float>(args[1].asNumber());
                 const float gainR = static_cast<float>(args[2].asNumber());
@@ -179,12 +185,14 @@ Val ClarihearHostObject::get(RT& rt, const Prop& name) {
                     Val v = obj.getProperty(rt, key);
                     return v.isNumber() ? static_cast<float>(v.asNumber()) : def;
                 };
-                p.thresholdDb  = getF("thresholdDb",  -40.f);
-                p.ratio        = getF("ratio",          4.f);
-                p.kneeDb       = getF("kneeDb",         6.f);
-                p.attackMs     = getF("attackMs",       5.f);
-                p.releaseMs    = getF("releaseMs",    100.f);
-                p.makeupGainDb = getF("makeupGainDb",  20.f);
+                // Missing fields fall back to the gentle placeholder; the engine clamps all of them.
+                const CompressorParams def;
+                p.thresholdDb  = getF("thresholdDb",  def.thresholdDb);
+                p.ratio        = getF("ratio",        def.ratio);
+                p.kneeDb       = getF("kneeDb",       def.kneeDb);
+                p.attackMs     = getF("attackMs",     def.attackMs);
+                p.releaseMs    = getF("releaseMs",    def.releaseMs);
+                p.makeupGainDb = getF("makeupGainDb", def.makeupGainDb);
 
                 _engine->setCompressorParams(p);
                 return Val::undefined();
@@ -201,31 +209,51 @@ Val ClarihearHostObject::get(RT& rt, const Prop& name) {
             });
     }
 
-    // ── applyAudiogram(leftGains: number[], rightGains: number[]) → void
-    // Called ONCE after the hearing test completes.
-    // Not latency-critical — this is a settings call, not a drag handler.
-    // But we still make it synchronous (no Promise needed — it's instant).
-    if (nameStr == "applyAudiogram") {
-        return makeFunction(rt, "applyAudiogram", 2,
+    // ── setBandGains(leftDb: number[6], rightDb: number[6]) → boolean ─────
+    // Fitted band gains in dB GAIN from src/hearing/fitting.ts (never dB HL).
+    // Trust boundary: exactly kEqBands numbers per ear, or nothing is applied.
+    // The engine clamps each value and bounds the combined response (Level 2).
+    if (nameStr == "setBandGains") {
+        return makeFunction(rt, "setBandGains", 2,
             [this](RT& rt, const Val&, const Val* args, size_t count) -> Val {
-                if (count < 2 || !args[0].isObject() || !args[1].isObject())
-                    return Val::undefined();
-
-                auto leftArr  = args[0].asObject(rt).asArray(rt);
-                auto rightArr = args[1].asObject(rt).asArray(rt);
-
                 constexpr size_t kBands = clarihear::kEqBands;
-                float left[kBands] = {}, right[kBands] = {};
-
-                for (size_t i = 0; i < kBands; ++i) {
-                    Val lv = leftArr.getValueAtIndex(rt, i);
-                    Val rv = rightArr.getValueAtIndex(rt, i);
-                    left[i]  = lv.isNumber() ? static_cast<float>(lv.asNumber()) : 0.f;
-                    right[i] = rv.isNumber() ? static_cast<float>(rv.asNumber()) : 0.f;
+                float gains[2][kBands] = {};
+                if (count < 2) return Val(false);
+                for (size_t ear = 0; ear < 2; ++ear) {
+                    if (!args[ear].isObject()) return Val(false);
+                    auto obj = args[ear].asObject(rt);
+                    if (!obj.isArray(rt)) return Val(false);
+                    auto arr = obj.asArray(rt);
+                    if (arr.size(rt) != kBands) return Val(false);
+                    for (size_t i = 0; i < kBands; ++i) {
+                        Val v = arr.getValueAtIndex(rt, i);
+                        if (!v.isNumber()) return Val(false);
+                        gains[ear][i] = static_cast<float>(v.asNumber());
+                    }
                 }
+                _engine->setBandGains(gains[0], gains[1]);
+                return Val(true);
+            });
+    }
 
-                _engine->setBandGains(left, right);  // fitted dB gain; engine clamps
+    // ── setBypass(on) / setMuted(on) → void ──────────────────────────
+    // Plain atomics in the engine: effective on the next audio callback.
+    if (nameStr == "setBypass" || nameStr == "setMuted") {
+        const bool mute = nameStr == "setMuted";
+        return makeFunction(rt, mute ? "setMuted" : "setBypass", 1,
+            [this, mute](RT&, const Val&, const Val* args, size_t count) -> Val {
+                const bool on = count >= 1 && args[0].isBool() && args[0].getBool();
+                if (mute) _engine->setMuted(on);
+                else      _engine->setBypass(on);
                 return Val::undefined();
+            });
+    }
+
+    // ── getLimiterEngagedCount() → number ────────────────────────────
+    if (nameStr == "getLimiterEngagedCount") {
+        return makeFunction(rt, "getLimiterEngagedCount", 0,
+            [this](RT&, const Val&, const Val*, size_t) -> Val {
+                return Val(static_cast<double>(_engine->limiterEngagedCount()));
             });
     }
 

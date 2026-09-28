@@ -55,9 +55,17 @@ RCT_EXPORT_METHOD(setFeedbackSuppression:(BOOL)enabled) {
     [CoreAudioPlayer shared].dspEngine->setFeedbackSuppression(enabled);
 }
 
-RCT_EXPORT_METHOD(applyAudiogram:(NSArray<NSNumber*>*)leftGains
+RCT_EXPORT_METHOD(setBypass:(BOOL)on) {
+    [CoreAudioPlayer shared].dspEngine->setBypass(on);
+}
+
+RCT_EXPORT_METHOD(setMuted:(BOOL)on) {
+    [CoreAudioPlayer shared].dspEngine->setMuted(on);
+}
+
+RCT_EXPORT_METHOD(setBandGains:(NSArray<NSNumber*>*)leftGains
                   rightGains:(NSArray<NSNumber*>*)rightGains) {
-    if (leftGains.count != 6 || rightGains.count != 6) return;
+    if (leftGains.count != clarihear::kEqBands || rightGains.count != clarihear::kEqBands) return;
 
     float l[6], r[6];
     for (int i = 0; i < 6; ++i) {

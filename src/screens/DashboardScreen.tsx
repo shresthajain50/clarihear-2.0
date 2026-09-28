@@ -7,7 +7,7 @@
 // ============================================================
 
 import React, {useState, useCallback, useRef} from 'react';
-import type {DspProfile} from '../hearing/types';
+import {gainDb, type DspProfile} from '../hearing/types';
 import {
   Animated,
   Pressable,
@@ -24,6 +24,7 @@ import VUMeter from '../components/VUMeter';
 import EQBand from '../components/EQBand';
 import {useAudio, useLevel} from '../hooks/useAudio';
 import type {EqBand} from '../native/types';
+import * as Audio from '../native/ClarihearAudio';
 import {DEFAULT_COMPRESSOR} from '../native/ClarihearAudio';
 
 // ── EQ band labels ────────────────────────────────────────────
@@ -81,7 +82,7 @@ export default function DashboardScreen({dspProfile, onOpenSettings}: Props) {
       next[band] = {l: gainL, r: gainR};
       return next;
     });
-    audio.setEqBand(band, gainL, gainR);  // → JSI → C++ AudioEngine (sync)
+    Audio.developer.setEqBandGain(band, gainDb(gainL), gainDb(gainR));  // dev-only raw EQ; engine clamps
   }, [audio]);
 
   // ── Volume slider ─────────────────────────────────────────────
@@ -93,7 +94,7 @@ export default function DashboardScreen({dspProfile, onOpenSettings}: Props) {
   // ── AFC toggle ────────────────────────────────────────────────
   const onAfcToggle = useCallback((val: boolean) => {
     setAfc(val);
-    audio.setFeedbackSuppression(val);
+    Audio.developer.setFeedbackSuppression(val);
   }, [audio]);
 
   // ── Tab indicator X position ──────────────────────────────────
@@ -245,7 +246,7 @@ export default function DashboardScreen({dspProfile, onOpenSettings}: Props) {
                 onChange={v => {
                   const p = {...comp, thresholdDb: v};
                   setComp(p);
-                  audio.setCompressor(p);
+                  Audio.developer.setCompressorParams(p);
                 }}
               />
               <CompSlider
@@ -257,7 +258,7 @@ export default function DashboardScreen({dspProfile, onOpenSettings}: Props) {
                 onChange={v => {
                   const p = {...comp, ratio: v};
                   setComp(p);
-                  audio.setCompressor(p);
+                  Audio.developer.setCompressorParams(p);
                 }}
               />
               <CompSlider
@@ -269,7 +270,7 @@ export default function DashboardScreen({dspProfile, onOpenSettings}: Props) {
                 onChange={v => {
                   const p = {...comp, attackMs: v};
                   setComp(p);
-                  audio.setCompressor(p);
+                  Audio.developer.setCompressorParams(p);
                 }}
               />
               <CompSlider
@@ -281,7 +282,7 @@ export default function DashboardScreen({dspProfile, onOpenSettings}: Props) {
                 onChange={v => {
                   const p = {...comp, releaseMs: v};
                   setComp(p);
-                  audio.setCompressor(p);
+                  Audio.developer.setCompressorParams(p);
                 }}
               />
               <CompSlider
@@ -293,7 +294,7 @@ export default function DashboardScreen({dspProfile, onOpenSettings}: Props) {
                 onChange={v => {
                   const p = {...comp, makeupGainDb: v};
                   setComp(p);
-                  audio.setCompressor(p);
+                  Audio.developer.setCompressorParams(p);
                 }}
               />
 

@@ -1,204 +1,118 @@
 // ============================================================
-//  ClarihearAudio.ts  —  TypeScript API Layer (Phase 4)
+//  ClarihearAudio.ts  —  the only way the UI talks to the audio engine.
 //
-//  This module is the ONLY way the React Native UI interacts
-//  with the audio engine. All other layers are implementation details.
+//    UI → ClarihearAudio → global.clarihear (JSI, sync) → C++ AudioEngine setters
+//                        ↘ NativeModules.ClarihearAudio (async bridge fallback, iOS)
+//  Setters publish through the engine's lock-free mailbox; JS never touches the
+//  audio thread (PRD §50).
 //
-//  Architecture:
-//    UI Component → ClarihearAudio.setEqBandGain(band, l, r)
-//                 → global.clarihear.setEqBandGain(band, l, r)  [JSI — sync]
-//                 → C++ AudioEngine::setEqBandGain()             [~200ns]
-//                 → pending-value field picked up by audio thread [<1ms]
-//
-//  Fallback path (no JSI, e.g. debug/old-arch):
-//    → ClarihearNativeModule.setEqBandGain()  [async bridge, ~16ms]
-//
-//  The UI never needs to know which path is taken.
+//  Consumer API: applyDspProfile, volume, bypass, mute, start/stop, meters.
+//  Raw EQ / compressor / AFC live in `developer` only (ENGINEERING_SKILL rule 7).
+//  Gains are GainDb: thresholds (DbHL) can't be passed here, only fitted profiles.
 // ============================================================
 
 import {NativeModules} from 'react-native';
 import type {CompressorParams, EqBand} from './types';
-import type {DspProfile} from '../hearing/types';
+import {gainDb, type DspProfile, type GainDb} from '../hearing/types';
 
-// ── Frequency bands (Hz) for each EQ band index ──────────────
-export const EQ_FREQUENCIES: Record<EqBand, number> = {
-  0: 250,
-  1: 500,
-  2: 1000,
-  3: 2000,
-  4: 4000,
-  5: 8000,
-};
+export const EQ_FREQUENCIES: Record<EqBand, number> = {0: 250, 1: 500, 2: 1000, 3: 2000, 4: 4000, 5: 8000};
 
-// ── Access the JSI host object ────────────────────────────────
-// global.clarihear is installed by ClarihearJSI.mm/ClarihearJSI.cpp
-// before the JS bundle executes. If it's undefined, we fell back to
-// the async NativeModule bridge (which is still functional, just slower).
+// Installed by ClarihearJSI (iOS) / AudioModule.installFromContext (Android) before the bundle runs.
 const jsi = global.clarihear;
-
-// Async bridge fallback (Phase 3 path — always available)
 const nativeBridge = NativeModules.ClarihearAudio;
 
-// ── Internal: dispatch to JSI if available, else async bridge ─
-function callSync<T>(
-  jsiMethod: ((jsi: NonNullable<typeof global.clarihear>) => T) | undefined,
-  fallback: () => void,
-): T | undefined {
-  if (jsi && jsiMethod) {
-    return jsiMethod(jsi);
-  }
-  fallback();
-  return undefined;
-}
-
-// ============================================================
-//  Public API
-// ============================================================
-
-/**
- * Start the mic→DSP→speaker pipeline.
- * Requests microphone permission if needed.
- * @returns true on success
- */
 export async function startAudio(): Promise<boolean> {
-  if (jsi) {
-    try {
-      return await jsi.startAudio();
-    } catch (e) {
-      console.warn('[ClarihearAudio] JSI startAudio failed:', e);
-      return false;
-    }
-  }
-  // Async bridge fallback
   try {
-    return await nativeBridge?.start?.();
-  } catch {
+    return jsi ? await jsi.startAudio() : Boolean(await nativeBridge?.start?.());
+  } catch (e) {
+    console.warn('[ClarihearAudio] startAudio failed:', e);
     return false;
   }
 }
 
-/**
- * Stop the audio pipeline. Safe to call multiple times.
- */
 export function stopAudio(): void {
-  if (jsi) {
-    jsi.stopAudio();
-  } else {
-    nativeBridge?.stop?.();
-  }
+  if (jsi) jsi.stopAudio();
+  else nativeBridge?.stop?.();
 }
 
-/**
- * Set the master output volume.
- * @param linear — 0.0 (mute) to 1.0 (full volume)
- *
- * ★ SYNCHRONOUS via JSI — call on every slider frame change.
- *    The latency from JS call to audio change: ~200ns.
- */
+/** Output volume, linear 0..1 (only ever attenuates). Non-finite → 0. */
 export function setMasterVolume(linear: number): void {
-  callSync(
-    jsi => jsi.setMasterVolume(Math.max(0, Math.min(1, linear))),
-    () => nativeBridge?.setMasterVolume?.(linear),
-  );
+  const v = Number.isFinite(linear) ? Math.max(0, Math.min(1, linear)) : 0;
+  if (jsi) jsi.setMasterVolume(v);
+  else nativeBridge?.setMasterVolume?.(v);
 }
 
-/**
- * Set the EQ gain for a single frequency band.
- * @param band      — EQ band index (0=250Hz … 5=8kHz)
- * @param gainDbL   — Left ear gain in dB (e.g. audiogram threshold value)
- * @param gainDbR   — Right ear gain in dB
- *
- * ★ SYNCHRONOUS via JSI — THE latency-critical call.
- *    Called on every slider drag frame at 60fps.
- *    Execution time: ~200 nanoseconds (JSI) vs ~16ms (async bridge).
- */
-export function setEqBandGain(
-  band: EqBand,
-  gainDbL: number,
-  gainDbR: number,
-): void {
-  callSync(
-    jsi => jsi.setEqBandGain(band, gainDbL, gainDbR),
-    () => nativeBridge?.setEqBandGain?.(band, gainDbL, gainDbR),
-  );
-}
-
-/**
- * Apply a fitted DSP profile's band gains (dB gain, NOT dB HL).
- * The only input is a DspProfile from hearing/fitting.ts; thresholds can't be passed here.
- * The engine clamps every gain again on its side (cpp/GainConstraints.h).
- */
+/** Apply a fitted profile from hearing/fitting.ts. The engine clamps everything again. */
 export function applyDspProfile(dsp: DspProfile): void {
-  // ponytail: still rides the legacy native `applyAudiogram` method name; renamed in the bridge ticket.
   const left = [...dsp.bandGainsLeft];
   const right = [...dsp.bandGainsRight];
+  const {thresholdDbfs, ratio, kneeDb, attackMs, releaseMs} = dsp.compression;
+  const comp: CompressorParams = {thresholdDb: thresholdDbfs, ratio, kneeDb, attackMs, releaseMs, makeupGainDb: 0};
   if (jsi) {
-    jsi.applyAudiogram(left, right);
+    jsi.setBandGains(left, right);
+    jsi.setCompressorParams(comp);
   } else {
-    nativeBridge?.applyAudiogram?.(left, right);
+    nativeBridge?.setBandGains?.(left, right);
   }
 }
 
-/**
- * Set compressor parameters for the WDRC (Wide Dynamic Range Compression).
- * ★ SYNCHRONOUS via JSI.
- */
-export function setCompressorParams(params: CompressorParams): void {
-  callSync(
-    jsi => jsi.setCompressorParams(params),
-    () => {/* async bridge doesn't have this yet */},
-  );
+/** Unprocessed passthrough (still output-limited). */
+export function setBypass(on: boolean): void {
+  if (jsi) jsi.setBypass(on);
+  else nativeBridge?.setBypass?.(on);
 }
 
-/**
- * Enable or disable acoustic feedback suppression (AFC).
- * ★ SYNCHRONOUS via JSI.
- */
-export function setFeedbackSuppression(enabled: boolean): void {
-  callSync(
-    jsi => jsi.setFeedbackSuppression(enabled),
-    () => nativeBridge?.setFeedbackSuppression?.(enabled),
-  );
+/** Instant silence. Wins over everything. */
+export function setMuted(on: boolean): void {
+  if (jsi) jsi.setMuted(on);
+  else nativeBridge?.setMuted?.(on);
 }
 
-/**
- * Get the current input level in dBFS.
- * Returns -96 (silence) if audio is not running.
- * ★ SYNCHRONOUS — safe to call in requestAnimationFrame at 60fps.
- */
+/** Samples the Level-1 limiter has reduced; a rising count drives the PRD §52 message. */
+export function getLimiterEngagedCount(): number {
+  return jsi ? jsi.getLimiterEngagedCount() : 0;
+}
+
 export function getInputLevel(): number {
   return jsi ? jsi.getInputLevel() : -96;
 }
 
-/**
- * Get the current output level in dBFS.
- * ★ SYNCHRONOUS.
- */
 export function getOutputLevel(): number {
   return jsi ? jsi.getOutputLevel() : -96;
 }
 
-/**
- * Indicates whether the JSI host object is installed and available.
- * If false, the async bridge fallback is being used (higher latency).
- */
 export function isJSIAvailable(): boolean {
   return jsi !== undefined;
 }
 
-/**
- * Get the Hz frequency for a band index.
- */
 export function getBandHz(band: EqBand): number {
   return EQ_FREQUENCIES[band];
 }
 
-// ── Engineering placeholder compressor (NOT a clinical prescription, PRD §6 issue 5) ──
+/** Developer mode only. Never reachable from consumer screens. */
+export const developer = {
+  setEqBandGain(band: EqBand, left: GainDb, right: GainDb): void {
+    const l = gainDb(left);
+    const r = gainDb(right);
+    if (jsi) jsi.setEqBandGain(band, l, r);
+    else nativeBridge?.setEqBandGain?.(band, l, r);
+  },
+  setCompressorParams(params: CompressorParams): void {
+    jsi?.setCompressorParams(params);
+  },
+  /** Prototype only: NOT feedback cancellation (PRD §24). Off by default. */
+  setFeedbackSuppression(enabled: boolean): void {
+    if (jsi) jsi.setFeedbackSuppression(enabled);
+    else nativeBridge?.setFeedbackSuppression?.(enabled);
+  },
+};
+
+/** Engineering placeholder compressor for developer mode (NOT a clinical prescription, PRD §6 issue 5). */
 export const DEFAULT_COMPRESSOR: CompressorParams = {
-  thresholdDb:  -40,
-  ratio:          2,
-  kneeDb:         6,
-  attackMs:       5,
-  releaseMs:    100,
-  makeupGainDb:   0,
+  thresholdDb: -40,
+  ratio: 2,
+  kneeDb: 6,
+  attackMs: 5,
+  releaseMs: 100,
+  makeupGainDb: 0,
 };

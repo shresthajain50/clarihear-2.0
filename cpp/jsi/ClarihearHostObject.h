@@ -21,16 +21,17 @@
 //    clarihear.startAudio()                      → Promise<boolean>
 //    clarihear.stopAudio()                       → void
 //    clarihear.setMasterVolume(linear: number)   → void   ← sync
-//    clarihear.setEqBandGain(b, gL, gR: number)  → void   ← sync ★
-//    clarihear.setCompressorParams(params)        → void   ← sync
-//    clarihear.setFeedbackSuppression(bool)       → void   ← sync
-//    clarihear.applyAudiogram(left[], right[])    → void
+//    clarihear.setBandGains(left[6], right[6])    → bool   ← fitted dB gain, validated
+//    clarihear.setBypass(bool) / setMuted(bool)   → void
+//    clarihear.getLimiterEngagedCount()           → number
+//  Developer mode only (ENGINEERING_SKILL rule 7):
+//    clarihear.setEqBandGain(b, gL, gR: number)  → void   ← sync
+//    clarihear.setCompressorParams(params)        → void   ← sync, engine clamps
+//    clarihear.setFeedbackSuppression(bool)       → void   ← prototype, not AFC
 //    clarihear.getInputLevel()                   → number ← sync
 //    clarihear.getOutputLevel()                  → number ← sync
 //
-//  ★ setEqBandGain is the latency-critical method — called on every
-//    slider drag frame (60fps). Its sub-microsecond cost is what makes
-//    JSI mandatory for this use case.
+//  ★ setMasterVolume is the latency-critical call (volume slider drag, ~60fps).
 // ============================================================
 
 #pragma once

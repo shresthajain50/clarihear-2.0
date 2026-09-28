@@ -4,7 +4,7 @@
 //  Standard RCTBridgeModule wrapper around CoreAudioPlayer.
 //  Phase 4 will replace this with a JSI HostObject for
 //  synchronous access — this module handles non-realtime calls
-//  (start, stop, applyAudiogram) that don't need <1µs latency.
+//  (start, stop, setBandGains) that don't need <1µs latency.
 // ============================================================
 
 #import <React/RCTBridgeModule.h>

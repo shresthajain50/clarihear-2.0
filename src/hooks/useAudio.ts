@@ -4,7 +4,6 @@
 
 import {useState, useCallback, useEffect, useRef} from 'react';
 import * as Audio from '../native/ClarihearAudio';
-import type {CompressorParams, EqBand} from '../native/types';
 import type {DspProfile} from '../hearing/types';
 
 interface AudioState {
@@ -19,10 +18,9 @@ interface UseAudioReturn extends AudioState {
   stop: () => void;
   toggle: () => Promise<void>;
   setVolume: (linear: number) => void;
-  setEqBand: (band: EqBand, gainL: number, gainR: number) => void;
   applyDspProfile: (dsp: DspProfile) => void;
-  setCompressor: (params: CompressorParams) => void;
-  setFeedbackSuppression: (enabled: boolean) => void;
+  setBypass: (on: boolean) => void;
+  setMuted: (on: boolean) => void;
 }
 
 export function useAudio(): UseAudioReturn {
@@ -62,21 +60,12 @@ export function useAudio(): UseAudioReturn {
     Audio.setMasterVolume(linear);
   }, []);
 
-  const setEqBand = useCallback((band: EqBand, gainL: number, gainR: number) => {
-    Audio.setEqBandGain(band, gainL, gainR);
-  }, []);
-
   const applyDspProfile = useCallback((dsp: DspProfile) => {
     Audio.applyDspProfile(dsp);
   }, []);
 
-  const setCompressor = useCallback((params: CompressorParams) => {
-    Audio.setCompressorParams(params);
-  }, []);
-
-  const setFeedbackSuppression = useCallback((enabled: boolean) => {
-    Audio.setFeedbackSuppression(enabled);
-  }, []);
+  const setBypass = useCallback((on: boolean) => Audio.setBypass(on), []);
+  const setMuted = useCallback((on: boolean) => Audio.setMuted(on), []);
 
   return {
     ...state,
@@ -84,10 +73,9 @@ export function useAudio(): UseAudioReturn {
     stop,
     toggle,
     setVolume,
-    setEqBand,
     applyDspProfile,
-    setCompressor,
-    setFeedbackSuppression,
+    setBypass,
+    setMuted,
   };
 }
 

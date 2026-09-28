@@ -79,9 +79,9 @@ JNI_FUNC(nativeSetEqBandGain)(JNIEnv* /*env*/, jobject /*thiz*/,
 }
 
 // ============================================================
-//  nativeApplyAudiogram
+//  nativeSetBandGains  (fitted dB gain, never dB HL)
 // ============================================================
-JNI_FUNC(nativeApplyAudiogram)(JNIEnv* env, jobject /*thiz*/,
+JNI_FUNC(nativeSetBandGains)(JNIEnv* env, jobject /*thiz*/,
                                 jfloatArray leftGains,
                                 jfloatArray rightGains) -> void {
     if (!gPlayer || !leftGains || !rightGains) return;
@@ -104,6 +104,14 @@ JNI_FUNC(nativeApplyAudiogram)(JNIEnv* env, jobject /*thiz*/,
     // Release without copying back (JNI_ABORT) — we only read them
     if (left)  env->ReleaseFloatArrayElements(leftGains,  left,  JNI_ABORT);
     if (right) env->ReleaseFloatArrayElements(rightGains, right, JNI_ABORT);
+}
+
+JNI_FUNC(nativeSetBypass)(JNIEnv* /*env*/, jobject /*thiz*/, jboolean on) -> void {
+    if (gPlayer) gPlayer->dspEngine().setBypass(on == JNI_TRUE);
+}
+
+JNI_FUNC(nativeSetMuted)(JNIEnv* /*env*/, jobject /*thiz*/, jboolean on) -> void {
+    if (gPlayer) gPlayer->dspEngine().setMuted(on == JNI_TRUE);
 }
 
 // ============================================================

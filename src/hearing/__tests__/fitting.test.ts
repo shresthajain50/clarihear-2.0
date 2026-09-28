@@ -6,7 +6,7 @@ import {
   fitHearingProfile,
   nalRInsertionGain,
 } from '../fitting';
-import {dbHL, type BandGains, type FrequencyThresholds, type HearingProfile} from '../types';
+import {BAND_GAIN_RANGE_DB, dbHL, type BandGains, type FrequencyThresholds, type HearingProfile} from '../types';
 
 const flat = (hl: number): FrequencyThresholds =>
   [hl, hl, hl, hl, hl, hl].map(dbHL) as unknown as FrequencyThresholds;
@@ -175,6 +175,7 @@ describe('limits stay in sync with the C++ engine (defence in depth)', () => {
 
   it('uses the same per-band ceiling and floor as GainConstraints.h', () => {
     expect(FITTING_LIMITS.maxBandGainDb).toBe(cpp('kMaxBandGainDb'));
+    expect(BAND_GAIN_RANGE_DB).toEqual({min: cpp('kMinBandGainDb'), max: cpp('kMaxBandGainDb')});
     expect(FITTING_LIMITS.maxBandGainDb).toBeLessThanOrEqual(cpp('kMaxTotalGainDb'));
   });
 });

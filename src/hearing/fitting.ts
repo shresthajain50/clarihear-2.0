@@ -8,6 +8,7 @@
 
 import {
   BAND_COUNT,
+  BAND_GAIN_RANGE_DB,
   type BandGains,
   type CompressionProfile,
   type DspProfile,
@@ -20,7 +21,7 @@ export const FITTING_VERSION = 'clarihear-research-0.1.0';
 
 export const FITTING_LIMITS = {
   /** Level 2 per-band ceiling; must equal kMaxBandGainDb in cpp/GainConstraints.h. */
-  maxBandGainDb: 20,
+  maxBandGainDb: BAND_GAIN_RANGE_DB.max,
   /** Thresholds at or below this get no gain. */
   gainOnsetDbHL: 20,
   /** Acclimatization: first-time users start at this fraction of the target. */

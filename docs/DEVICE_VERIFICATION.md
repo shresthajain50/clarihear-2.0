@@ -30,3 +30,22 @@ With wired headphones, at a quiet room level, volume starting low:
 - [ ] iOS: confirm the tap delivers 48 kHz. The engine assumes 48 kHz, and 44.1 kHz
       routes (some Bluetooth) would shift every EQ band by about 8%.
 - [ ] Watch for denormal CPU spikes after long silence (the profiler should stay flat).
+
+## Bridge: applyDspProfile / developer API (#7)
+
+`ClarihearHostObject.cpp` compiles (`-fsyntax-only -Wall -Wextra`) against
+`node_modules/react-native/ReactCommon/jsi`. Its behaviour inside Hermes,
+the ObjC module, Kotlin and JNI has **not** been run.
+
+- [ ] iOS: `global.clarihear` exists. `Object.keys(global.clarihear)` lists `setBandGains`,
+      `setBypass`, `setMuted`, `getLimiterEngagedCount`, and no longer lists `applyAudiogram`.
+- [ ] Android: the same, via `AudioModule.installFromContext`. Also rebuild so the JNI
+      symbols `nativeSetBandGains`, `nativeSetBypass` and `nativeSetMuted` link. A
+      mismatched name fails at call time with `UnsatisfiedLinkError`, not at build time.
+- [ ] From the JS console: `global.clarihear.setBandGains([1,2,3], [1,2,3])` returns
+      `false` and doesn't crash. `setEqBandGain('a', null, {})` does nothing and
+      doesn't crash, which matters on Android because the build uses `-fno-exceptions`.
+- [ ] Apply a fitted profile, then dump the engine state in developer mode: the gains
+      are the fitted values, not the audiogram dB HL values.
+- [ ] `setMuted(true)` while listening: silence immediately. `setBypass(true)`: raw mic
+      sound at unity gain.

@@ -13,7 +13,7 @@ import com.facebook.react.bridge.ReactContext
  *   1. Load the clarihear_dsp.so native library
  *   2. Install global.clarihear JSI host object into Hermes (Phase 4)
  *   3. Bridge permission checks to native audio code
- *   4. Expose start/stop/setEq/applyAudiogram to RN bridge (Phase 3 path)
+ *   4. Expose start/stop/setBandGains/bypass/mute (JSI is the primary path on Android)
  *
  * The JSI path (installJSI) is the production path for latency-critical
  * calls. The RN bridge path (nativeSetEqBandGain, etc.) is kept for
@@ -89,10 +89,14 @@ class AudioModule(private val context: Context) {
     fun setEqBandGain(band: Int, gainDbL: Float, gainDbR: Float) =
         nativeSetEqBandGain(band, gainDbL, gainDbR)
 
-    fun applyAudiogram(leftGains: FloatArray, rightGains: FloatArray) {
+    /** Fitted band gains in dB GAIN (never dB HL), 6 per ear. The engine clamps again. */
+    fun setBandGains(leftGains: FloatArray, rightGains: FloatArray) {
         require(leftGains.size == 6 && rightGains.size == 6)
-        nativeApplyAudiogram(leftGains, rightGains)
+        nativeSetBandGains(leftGains, rightGains)
     }
+
+    fun setBypass(on: Boolean) = nativeSetBypass(on)
+    fun setMuted(on: Boolean)  = nativeSetMuted(on)
 
     fun setMasterVolume(linear: Float)         = nativeSetMasterVolume(linear)
     fun setFeedbackSuppression(enabled: Boolean) = nativeSetFeedbackSuppression(enabled)
@@ -107,7 +111,9 @@ class AudioModule(private val context: Context) {
     private external fun nativeStop()
     private external fun nativeIsRunning(): Boolean
     private external fun nativeSetEqBandGain(band: Int, gainL: Float, gainR: Float)
-    private external fun nativeApplyAudiogram(leftGains: FloatArray, rightGains: FloatArray)
+    private external fun nativeSetBandGains(leftGains: FloatArray, rightGains: FloatArray)
+    private external fun nativeSetBypass(on: Boolean)
+    private external fun nativeSetMuted(on: Boolean)
     private external fun nativeSetMasterVolume(linear: Float)
     private external fun nativeSetFeedbackSuppression(enabled: Boolean)
     private external fun nativeGetInputLevelDb(): Float
