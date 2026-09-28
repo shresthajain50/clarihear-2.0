@@ -256,3 +256,20 @@ The sum is clamped to **±6 dB per band** (Q3), then to the Level-2 ceiling
 
 **Needs:** audiologist/UX review of the magnitudes, and a speech-in-noise check
 (M6) that Conversation actually helps.
+
+---
+
+## Q10 — Ambient-noise gate threshold on an uncalibrated mic (ticket #16)
+
+**Context:** PRD §10 says the test must reject noisy rooms. Phone mics are
+uncalibrated, and dBFS→SPL varies by device and OS processing, so a fixed dBFS
+threshold is only a coarse proxy.
+
+**Default** (`AMBIENT_CHECK` in `src/hearing/deviceCheck.ts`): take the median
+of at least 20 input-meter readings (about 3 s); median > −45 dBFS counts as
+too noisy (PRD copy); median ≤ −95 dBFS, or too few readings, counts as "no
+signal". A dead mic never counts as quiet. The median means a single door slam
+doesn't fail the check.
+
+**Needs:** per-device measurement (bench, PRD §47 Stage 2) relating dBFS to
+dB(A), and the DIN protocol's own ambient limit once stimuli are chosen (Q6).
