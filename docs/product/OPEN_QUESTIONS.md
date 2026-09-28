@@ -208,3 +208,24 @@ No other red flag is marked urgent.
 
 **Needs:** clinical and regulatory review of the wording, and of whether
 pain/drainage or vertigo should also be urgent.
+
+---
+
+## Q8 — Secure local storage backend (ticket #14)
+
+**Context:** PRD §38 asks for "secure local storage" for hearing and DSP
+profiles, which are health-adjacent data. Options are Keychain/Keystore-backed
+storage (e.g. `react-native-encrypted-storage` / `react-native-keychain`),
+encrypted MMKV, or SQLite with SQLCipher. Any of them adds a native module,
+and that can't be verified here (no `pod install` / Gradle).
+
+**Default:** `src/storage/profileStore.ts` depends only on a 3-method
+`KeyValueStore` adapter. The conservative production choice is
+**Keychain (iOS) / EncryptedSharedPreferences (Android)** via
+`react-native-encrypted-storage`. It gets added and wired together with the
+first device build, and never plain AsyncStorage. The profile is one small
+JSON document, so no database is needed. Export is the stored JSON envelope,
+and delete removes the key.
+
+**Needs:** confirmation of the library, plus a privacy decision on whether
+export should strip `id`.
