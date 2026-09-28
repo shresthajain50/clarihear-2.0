@@ -1,162 +1,117 @@
 // ============================================================
-//  App.tsx  —  ClariHear 2.0 Root [Phase 5]
+//  App.tsx  —  Clarihear root
 //
-//  Navigation state machine (no external routing library):
+//  Navigation is the pure state machine in app/appFlow.ts (PRD §7, §35):
+//    welcome → safety → device check → [DIN, when stimuli exist] → profile → listening
+//                 ↘ professional referral (sticky) ↙
+//  Screens only render state and dispatch events.
 //
-//    onboarding → permission → audiogram → dashboard
-//                    ↓
-//               (if denied) → dashboard (limited mode)
-//
-//  The app state persists across sessions using a simple
-//  flag so first-time users see onboarding but returning
-//  users land directly on the dashboard.
+//  ponytail: profile is not persisted yet — storage/profileStore.ts is ready, but its
+//  secure backend needs a device build (OPEN_QUESTIONS Q8).
 // ============================================================
 
-import React, {useState, useCallback} from 'react';
-import {
-  Alert,
-  PermissionsAndroid,
-  Platform,
-  StatusBar,
-  StyleSheet,
-  View,
-} from 'react-native';
+import React, {useCallback, useReducer} from 'react';
+import {Alert, PermissionsAndroid, Platform, StatusBar, StyleSheet, Text, View} from 'react-native';
 import {Colors} from './theme';
-import OnboardingScreen from './screens/OnboardingScreen';
-import PermissionScreen from './screens/PermissionScreen';
-import AudiogramScreen  from './screens/AudiogramScreen';
-import DashboardScreen  from './screens/DashboardScreen';
-import type {Audiogram}  from './native/types';
-import {applyDspProfile} from './native/ClarihearAudio';
+import {appFlow, initialFlow} from './app/appFlow';
 import {FITTING_VERSION, fitHearingProfile} from './hearing/fitting';
-import {dbHL, type DspProfile, type FrequencyThresholds} from './hearing/types';
+import {dbHL, type FrequencyThresholds} from './hearing/types';
+import type {Audiogram} from './native/types';
+import OnboardingScreen from './screens/OnboardingScreen';
+import SafetyScreen from './screens/SafetyScreen';
+import PermissionScreen from './screens/PermissionScreen';
+import AudiogramScreen from './screens/AudiogramScreen';
+import ReferralScreen from './screens/ReferralScreen';
+import ListeningScreen from './screens/ListeningScreen';
+import SettingsScreen from './screens/SettingsScreen';
+import DeveloperScreen from './screens/DeveloperScreen';
 
 const toThresholds = (hl: readonly number[]) => hl.map(dbHL) as unknown as FrequencyThresholds;
 
-type Screen = 'onboarding' | 'permission' | 'audiogram' | 'dashboard';
+async function requestMicPermission(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true; // iOS prompts when audio starts
+  try {
+    const r = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO, {
+      title: 'Microphone access',
+      message: 'Clarihear needs your microphone to help you hear. Audio stays on this device.',
+      buttonPositive: 'Allow',
+      buttonNegative: 'Not now',
+    });
+    return r === PermissionsAndroid.RESULTS.GRANTED;
+  } catch {
+    return false;
+  }
+}
 
 export default function App() {
-  const [screen, setScreen]         = useState<Screen>('onboarding');
-  const [dspProfile, setDspProfile] = useState<DspProfile | undefined>(undefined);
+  const [flow, dispatch] = useReducer(appFlow, initialFlow({devModeAvailable: __DEV__}));
 
-  // ── Request mic permission (Android manual request) ──────────
-  const requestMicPermission = useCallback(async (): Promise<boolean> => {
-    if (Platform.OS === 'android') {
-      try {
-        const result = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-          {
-            title:   'Microphone Permission',
-            message: 'ClariHear needs your microphone to process audio.',
-            buttonPositive: 'Allow',
-            buttonNegative: 'Deny',
-          },
-        );
-        return result === PermissionsAndroid.RESULTS.GRANTED;
-      } catch {
-        return false;
-      }
-    }
-    // iOS: permission is requested by CoreAudioPlayer when startAudio() is called
-    return true;
+  const onPermission = useCallback(async () => {
+    if (await requestMicPermission()) dispatch({type: 'DEVICE_READY'});
+    else Alert.alert('Microphone needed', 'Live listening needs microphone access. You can allow it in Settings.');
   }, []);
 
-  // ── Navigation handlers ───────────────────────────────────────
-
-  const onOnboardingComplete = useCallback(() => {
-    setScreen('permission');
-  }, []);
-
-  const onPermissionGranted = useCallback(async () => {
-    const granted = await requestMicPermission();
-    if (granted || Platform.OS === 'ios') {
-      setScreen('audiogram');
-    } else {
-      Alert.alert(
-        'Permission Denied',
-        'ClariHear works best with microphone access. You can enable it in Settings.',
-        [{text: 'Continue Anyway', onPress: () => setScreen('dashboard')}],
-      );
-    }
-  }, [requestMicPermission]);
-
-  const onPermissionDenied = useCallback(() => {
-    setScreen('dashboard');
-  }, []);
-
-  const onAudiogramComplete = useCallback((ag: Audiogram) => {
-    // Thresholds never reach the engine: they go through the fitting module first.
-    let fit: ReturnType<typeof fitHearingProfile>;
+  const onAudiogram = useCallback((ag: Audiogram) => {
     try {
-      fit = fitHearingProfile({
+      const result = fitHearingProfile({
         left: toThresholds(ag.left),
         right: toThresholds(ag.right),
         source: 'audiogram_import',
         confidence: 1,
         fittingVersion: FITTING_VERSION,
       });
+      dispatch({type: 'FIT_RESULT', result});
     } catch {
       Alert.alert('Check your audiogram', 'Some values look out of range. Please re-enter them from your report.');
-      return;
     }
-    if (fit.kind === 'refer') {
-      Alert.alert(
-        'Professional evaluation recommended',
-        'A professional hearing evaluation is recommended before using personalized amplification.',
-      );
-      return;
-    }
-    setDspProfile(fit.dsp);
-    applyDspProfile(fit.dsp);
-    setScreen('dashboard');
   }, []);
 
-  const onAudiogramSkip = useCallback(() => {
-    setScreen('dashboard');
-  }, []);
+  const screen = (() => {
+    switch (flow.state) {
+      case 'first_launch':
+        return <OnboardingScreen onComplete={() => dispatch({type: 'START'})} />;
+      case 'safety_check':
+        return <SafetyScreen onResult={result => dispatch({type: 'SAFETY_RESULT', result})} />;
+      case 'device_check':
+        return (
+          <PermissionScreen
+            onGranted={onPermission}
+            onDenied={() => Alert.alert('Microphone needed', 'Live listening needs microphone access. You can allow it in Settings.')}
+          />
+        );
+      case 'screening':
+      case 'screening_result':
+        // Unreachable until validated DIN stimuli exist (flow.screeningAvailable, Q6).
+        return <Text style={styles.fallback}>Hearing screening isn't available in this version.</Text>;
+      case 'profile_setup':
+        return <AudiogramScreen onComplete={onAudiogram} onSkip={() => dispatch({type: 'SKIP_PROFILE'})} />;
+      case 'professional_referral':
+        return <ReferralScreen urgent={Boolean(flow.urgent)} onRestart={() => dispatch({type: 'RESTART'})} />;
+      case 'listening':
+        return <ListeningScreen dsp={flow.dsp!} onOpenSettings={() => dispatch({type: 'OPEN_SETTINGS'})} />;
+      case 'settings':
+        return (
+          <SettingsScreen
+            devModeAvailable={flow.devModeAvailable}
+            onBack={() => dispatch({type: 'CLOSE_SETTINGS'})}
+            onRepeatCheck={() => dispatch({type: 'REPEAT_CHECK'})}
+            onOpenDeveloper={() => dispatch({type: 'OPEN_DEVELOPER'})}
+          />
+        );
+      case 'developer':
+        return <DeveloperScreen dspProfile={flow.dsp} onClose={() => dispatch({type: 'CLOSE_DEVELOPER'})} />;
+    }
+  })();
 
-  // ── Render ────────────────────────────────────────────────────
   return (
     <View style={styles.root}>
-      <StatusBar
-        barStyle="light-content"
-        backgroundColor={Colors.bg1}
-        translucent={false}
-      />
-
-      {screen === 'onboarding' && (
-        <OnboardingScreen onComplete={onOnboardingComplete} />
-      )}
-
-      {screen === 'permission' && (
-        <PermissionScreen
-          onGranted={onPermissionGranted}
-          onDenied={onPermissionDenied}
-        />
-      )}
-
-      {screen === 'audiogram' && (
-        <AudiogramScreen
-          onComplete={onAudiogramComplete}
-          onSkip={onAudiogramSkip}
-        />
-      )}
-
-      {screen === 'dashboard' && (
-        <DashboardScreen
-          dspProfile={dspProfile}
-          onOpenSettings={() =>
-            Alert.alert('Settings', 'Settings panel coming in Phase 6.')
-          }
-        />
-      )}
+      <StatusBar barStyle="light-content" backgroundColor={Colors.bg1} translucent={false} />
+      {screen}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: Colors.bg1,
-  },
+  root: {flex: 1, backgroundColor: Colors.bg1},
+  fallback: {color: Colors.textPrimary, fontSize: 20, padding: 24},
 });

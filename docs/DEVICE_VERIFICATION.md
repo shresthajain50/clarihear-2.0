@@ -49,3 +49,24 @@ the ObjC module, Kotlin and JNI has **not** been run.
       are the fitted values, not the audiogram dB HL values.
 - [ ] `setMuted(true)` while listening: silence immediately. `setBypass(true)`: raw mic
       sound at unity gain.
+
+## Consumer Live Hearing screen + flow (#13)
+
+Component and reducer tests run headlessly (jest with RN Testing Library). Real
+rendering, TalkBack/VoiceOver and gestures have **not** been checked on a device.
+
+- [ ] First launch shows Welcome, then the safety questions. Any "risky" answer
+      leads to the referral screen, and there's no way to listening from it except
+      Start over, then Yes, start over.
+- [ ] Listening screen: ON, the three modes, Volume −/+, Clarity −/+, Mute and
+      Natural sound are all reachable with one hand. The text is readable at the
+      largest system font size.
+- [ ] VoiceOver / TalkBack reads every control's label. The ON button is
+      announced as a switch with its checked state.
+- [ ] Release build: Settings shows **no** "Developer diagnostics" entry
+      (`__DEV__` is false).
+- [ ] Debug build: Settings, then Developer diagnostics, opens the old
+      dashboard. EQ sliders go from −12 to +20 and makeup from 0 to 6, and AFC
+      shows off.
+- [ ] Clap near the mic at max clarity/volume: "Clarihear reduced amplification…"
+      appears within about a second.

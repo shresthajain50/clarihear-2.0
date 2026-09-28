@@ -1,9 +1,10 @@
 // ============================================================
-//  screens/DashboardScreen.tsx  —  Live Mode UI  [Phase 5]
+//  screens/DeveloperScreen.tsx  —  Developer diagnostics (PRD §32)
 //
-//  The main screen after onboarding. Everything here is live
-//  audio — slider drags go through JSI to the C++ engine in
-//  real-time. VU meters update at 30fps via requestAnimationFrame.
+//  The former engineering dashboard. Reachable ONLY via Settings when
+//  developer mode is available (__DEV__ builds); never a consumer screen
+//  (ENGINEERING_SKILL rule 7). Raw controls go through Audio.developer,
+//  and the engine clamps them (Level 2) whatever the slider shows.
 // ============================================================
 
 import React, {useState, useCallback, useRef} from 'react';
@@ -37,10 +38,10 @@ const FLAT_EQ: EqGains = Array.from({length: 6}, () => ({l: 0, r: 0}));
 interface Props {
   /** Fitted gains from hearing/fitting.ts (dB gain, not dB HL). */
   dspProfile?: DspProfile;
-  onOpenSettings?: () => void;
+  onClose: () => void;
 }
 
-export default function DashboardScreen({dspProfile, onOpenSettings}: Props) {
+export default function DeveloperScreen({dspProfile, onClose}: Props) {
   const audio = useAudio();
   const {inputDb, outputDb} = useLevel(audio.isRunning);
 
@@ -56,7 +57,7 @@ export default function DashboardScreen({dspProfile, onOpenSettings}: Props) {
   });
 
   const [dualEar, setDualEar] = useState(true);
-  const [afc, setAfc]         = useState(true);
+  const [afc, setAfc]         = useState(false);  // engine default: prototype AFC off
   const [volume, setVolume]   = useState(0.85);
   const [activeTab, setActiveTab] = useState<'eq' | 'comp'>('eq');
 
@@ -110,11 +111,13 @@ export default function DashboardScreen({dspProfile, onOpenSettings}: Props) {
         {/* ── Header ──────────────────────────────────────────── */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.appTitle}>ClariHear</Text>
-            <Text style={styles.appSub}>Precision Hearing Assistance</Text>
+            <Text style={styles.appTitle}>Developer diagnostics</Text>
+            <Text style={styles.appSub}>Engineering controls. Not for users.</Text>
           </View>
           <Pressable
-            onPress={onOpenSettings}
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="Close developer diagnostics"
             style={({pressed}) => [styles.settingsBtn, pressed && {opacity: 0.6}]}>
             <SettingsIcon />
           </Pressable>
@@ -160,7 +163,7 @@ export default function DashboardScreen({dspProfile, onOpenSettings}: Props) {
         <View style={styles.toggleRow}>
           <TogglePill label="Dual Ear" value={dualEar} onChange={setDualEar} />
           <TogglePill
-            label="Feedback Cancel"
+            label="AFC prototype (not cancellation)"
             value={afc}
             onChange={onAfcToggle}
             color={Colors.secondary}
@@ -203,6 +206,8 @@ export default function DashboardScreen({dspProfile, onOpenSettings}: Props) {
                     gainL={g.l}
                     gainR={g.r}
                     showRight={dualEar}
+                    minGain={-12}
+                    maxGain={20}
                     onChange={onEqChange}
                   />
                 ))}
@@ -289,7 +294,7 @@ export default function DashboardScreen({dspProfile, onOpenSettings}: Props) {
                 label="Makeup Gain"
                 unit="dB"
                 value={comp.makeupGainDb}
-                min={0} max={40}
+                min={0} max={6}
                 color={Colors.eq[3]}
                 onChange={v => {
                   const p = {...comp, makeupGainDb: v};

@@ -17,9 +17,10 @@ interface Props {
   loading?: boolean;
   onPress: () => void;
   size?: number;
+  accessibilityLabel?: string;
 }
 
-export default function PowerButton({on, loading = false, onPress, size = 88}: Props) {
+export default function PowerButton({on, loading = false, onPress, size = 88, accessibilityLabel}: Props) {
   const pulse = useRef(new Animated.Value(1)).current;
   const glow  = useRef(new Animated.Value(0)).current;
   const spin  = useRef(new Animated.Value(0)).current;
@@ -85,6 +86,9 @@ export default function PowerButton({on, loading = false, onPress, size = 88}: P
 
       {/* Button core */}
       <Pressable
+        accessibilityRole="switch"
+        accessibilityLabel={accessibilityLabel ?? (on ? 'Turn off' : 'Turn on')}
+        accessibilityState={{checked: on, busy: loading}}
         onPress={onPress}
         style={({pressed}) => [
           styles.button,

@@ -227,7 +227,7 @@ export default function AudiogramScreen({onComplete, onSkip}: Props) {
         <Pressable
           onPress={onSkip}
           style={({pressed}) => [styles.secondaryBtn, pressed && {opacity: 0.6}]}>
-          <Text style={styles.secondaryBtnText}>Skip — Use Default Settings</Text>
+          <Text style={styles.secondaryBtnText}>Continue without personalization</Text>
         </Pressable>
 
         <View style={{height: Spacing.xxl}} />
