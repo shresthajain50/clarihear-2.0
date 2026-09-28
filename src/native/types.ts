@@ -44,6 +44,8 @@ export interface ClarihearJSI {
   setMuted(on: boolean): void;
   getLimiterEngagedCount(): number;
   getSessionStatus(): SessionStatus;
+  /** channel -1 off, 0 left, 1 right. Engine clamps level ≤ -20 dBFS. */
+  setTestTone(channel: number, freqHz: number, levelDbfs: number): void;
   // Developer mode only (ENGINEERING_SKILL rule 7):
   setEqBandGain(band: number, gainDbLeft: number, gainDbRight: number): void;
   setCompressorParams(params: CompressorParams): void;

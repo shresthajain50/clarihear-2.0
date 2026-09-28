@@ -42,16 +42,19 @@ extern "C" int pthread_mutex_lock(pthread_mutex_t* m) {
 // ── helpers ─────────────────────────────────────────────────
 constexpr int kBlock = 256;
 
-/// Run interleaved stereo `in` through the engine in kBlock-frame callbacks.
-static std::vector<float> run(AudioEngine& e, const std::vector<float>& in) {
-    std::vector<float> out(in.size());
-    const int frames = int(in.size() / 2);
+/// Run `frames` interleaved stereo frames through the engine in kBlock-frame callbacks.
+static void run(AudioEngine& e, const float* in, float* out, int frames) {
     for (int f = 0; f < frames; f += kBlock) {
         const int n = std::min(kBlock, frames - f);
         gInCallback = true;
-        e.process(in.data() + 2 * f, out.data() + 2 * f, n);
+        e.process(in + 2 * f, out + 2 * f, n);
         gInCallback = false;
     }
+}
+
+static std::vector<float> run(AudioEngine& e, const std::vector<float>& in) {
+    std::vector<float> out(in.size());
+    run(e, in.data(), out.data(), int(in.size() / 2));
     return out;
 }
 
@@ -59,11 +62,10 @@ static std::vector<float> run(AudioEngine& e, const std::vector<float>& in) {
 /// return the whole output so the measurement spans the join (where a click would be).
 template <class Fn>
 static std::vector<float> runWithChange(AudioEngine& e, const std::vector<float>& in, int split, Fn change) {
-    std::vector<float> a(in.begin(), in.begin() + 2 * split), b(in.begin() + 2 * split, in.end());
-    auto out = run(e, a);
+    std::vector<float> out(in.size());
+    run(e, in.data(), out.data(), split);
     change();
-    auto tail = run(e, b);
-    out.insert(out.end(), tail.begin(), tail.end());
+    run(e, in.data() + 2 * split, out.data() + 2 * split, int(in.size() / 2) - split);
     return out;
 }
 
@@ -74,11 +76,14 @@ static float gainDbAt(AudioEngine& e, float freq, float amp = 0.001f /* -60 dBFS
     return 20.f * std::log10(rms(out.data() + out.size() - tail, tail, 2) / rms(in.data() + in.size() - tail, tail, 2));
 }
 
-static float maxStep(const std::vector<float>& b, size_t from = 0) {
+/// Max sample-to-sample step on one channel (0 = left, 1 = right) of an interleaved buffer.
+static float maxStep(const std::vector<float>& b, size_t from = 0, size_t ch = 0) {
     float m = 0.f;
-    for (size_t i = from + 2; i < b.size(); i += 2) m = std::fmax(m, std::fabs(b[i] - b[i - 2]));
+    for (size_t i = from + ch + 2; i < b.size(); i += 2) m = std::fmax(m, std::fabs(b[i] - b[i - 2]));
     return m;
 }
+
+static float maxStepBoth(const std::vector<float>& b) { return std::fmax(maxStep(b, 0, 0), maxStep(b, 0, 1)); }
 
 /// Max |second difference|: a click is a curvature spike; a low tone has almost none.
 static float maxCurvature(const std::vector<float>& b, size_t from = 0) {
@@ -191,6 +196,49 @@ void test_session_pause_silences() {
     EXPECT_TRUE(peakAbs(back) > 0.5f * peakAbs(want), "Engine: audio returns only when the platform reports Running again");
 }
 
+void test_test_tone() {
+    // L/R headphone check (PRD §11): tone on exactly one ear, bounded level, mic cut.
+    AudioEngine e;
+    const float kMax[kEqBands] = {20, 20, 20, 20, 20, 20};
+    e.setBandGains(kMax, kMax);
+    e.setTestTone(0, 1000.f, -30.f);
+    auto out = run(e, stereo(noise(24000, 0.5f)));   // loud mic input must not leak through
+    const size_t tail = 2 * 12000;
+    float rightPeak = 0.f;
+    for (size_t i = out.size() - tail + 1; i < out.size(); i += 2) rightPeak = std::fmax(rightPeak, std::fabs(out[i]));
+    const float leftRmsDb = 20.f * std::log10(rms(out.data() + out.size() - tail, tail, 2));
+    EXPECT_NEAR(leftRmsDb, -30.f - 3.01f, 0.2f, "Tone: left ear gets the requested level (sine RMS)");
+    EXPECT_TRUE(rightPeak == 0.f, "Tone: the other ear is exactly silent and the mic is cut");
+    int crossings = 0;
+    for (size_t i = out.size() - tail + 2; i < out.size(); i += 2) crossings += (out[i - 2] < 0.f) != (out[i] < 0.f);
+    EXPECT_NEAR(float(crossings), 2.f * 1000.f * 0.25f, 4.f, "Tone: frequency is correct (zero crossings)");
+
+    // Switch ears mid-stream (measured across the join, both channels).
+    // Split at +12 samples (¼ period of 1 kHz) so the switch lands on a tone peak, not a zero.
+    auto r = runWithChange(e, stereo(std::vector<float>(48000, 0.f)), 24012, [&] { e.setTestTone(1, 1000.f, 0.f); });  // asks for 0 dBFS
+    float leftPeak = 0.f, rPeak = 0.f;
+    for (size_t i = r.size() - tail; i < r.size(); i += 2) { leftPeak = std::fmax(leftPeak, std::fabs(r[i])); rPeak = std::fmax(rPeak, std::fabs(r[i + 1])); }
+    EXPECT_TRUE(leftPeak == 0.f && rPeak <= std::pow(10.f, limits::kMaxToneDbfs / 20.f) + 1e-6f, "Tone: switches ear; level clamped to kMaxToneDbfs");
+    EXPECT_TRUE(maxStepBoth(r) < 0.02f, "Tone: ear switch is ramped (no click)");
+
+    e.setMuted(true);
+    auto m = run(e, stereo(std::vector<float>(4800, 0.f)));
+    float mutedPeak = 0.f;
+    for (size_t i = 2 * kBlock; i < m.size(); ++i) mutedPeak = std::fmax(mutedPeak, std::fabs(m[i]));
+    EXPECT_TRUE(mutedPeak == 0.f, "Tone: mute still wins");
+
+    AudioEngine e2;
+    e2.setTestTone(0, NAN, -30.f);
+    EXPECT_TRUE(peakAbs(run(e2, stereo(std::vector<float>(4800, 0.f)))) == 0.f, "Tone: non-finite frequency → no tone");
+    e2.setTestTone(0, 1000.f, -30.f);
+    run(e2, stereo(std::vector<float>(4800, 0.f)));
+    e2.setTestTone(-1, 0.f, 0.f);
+    auto in = stereo(sine(440.f, 24000, 0.001f));
+    auto back = run(e2, in);
+    EXPECT_NEAR(20.f * std::log10(rms(back.data() + back.size() - tail, tail, 2) / rms(in.data() + in.size() - tail, tail, 2)), 0.f, 0.5f,
+                "Tone: off → normal processing returns");
+}
+
 void test_volume_zero_and_click_free() {
     AudioEngine e;
     e.setMasterVolume(0.f);
@@ -259,6 +307,7 @@ void test_rt_safety() {
         e.setMasterVolume(0.05f * i);
         e.setBypass(i % 3 == 0);
         e.setMuted(i % 5 == 0);
+        e.setTestTone(i % 4 - 1, 500.f + 100.f * i, -40.f);
         run(e, in);
     }
     printf("       allocations in process(): %ld, mutex locks in process(): %ld\n", gAllocs, gLocks);
@@ -292,6 +341,7 @@ int main() {
     test_bypass_bit_exact();
     test_mute_immediate_and_wins();
     test_session_pause_silences();
+    test_test_tone();
     test_volume_zero_and_click_free();
     test_eq_change_click_free();
     test_non_finite();

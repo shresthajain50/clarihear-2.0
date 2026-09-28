@@ -63,6 +63,9 @@ struct RtParams {
     BiquadCoeffs eqR[kEqBands]{};
     CompressorParams comp{};
     float volume = 1.f;
+    int toneChannel = -1;   ///< -1 off, 0 left, 1 right
+    float tonePhaseInc = 0.f;
+    float toneAmp = 0.f;    ///< peak, linear, ≤ 10^(kMaxToneDbfs/20)
 };
 
 /// Single-producer / single-consumer triple buffer. write() and read() are wait-free.
@@ -130,6 +133,10 @@ public:
     void setBypass(bool on) noexcept { _bypass.store(on, std::memory_order_relaxed); }
     /// Silence. Wins over everything. 2 ms ramp.
     void setMuted(bool on) noexcept { _muted.store(on, std::memory_order_relaxed); }
+    /// Output-only test tone for the headphone L/R check (PRD §11): channel -1 off, 0 left,
+    /// 1 right; freq 125..8000 Hz; peak level clamped ≤ kMaxToneDbfs. While on, the mic path
+    /// is crossfaded out; mute and the limiter still apply. Non-finite args → off.
+    void setTestTone(int channel, float freqHz, float levelDbfs) noexcept;
     /// Platform layer only. Paused states silence output (like mute, independent of it).
     void setSessionStatus(SessionStatus s) noexcept { _session.store(int(s), std::memory_order_relaxed); }
     SessionStatus sessionStatus() const noexcept { return SessionStatus(_session.load(std::memory_order_relaxed)); }
@@ -153,6 +160,8 @@ private:
     float _gainL[kEqBands]{}, _gainR[kEqBands]{};
     CompressorParams _comp{};
     float _volumeReq = 1.f;
+    int _toneChannelReq = -1;
+    float _toneFreqReq = 0.f, _toneDbfsReq = -100.f;
     TripleBuffer<RtParams> _mailbox;
 
     // Audio-thread state.
@@ -162,6 +171,7 @@ private:
     float _volume = 1.f, _volumeTarget = 1.f, _volumeStep = 0.f;
     int _volumeRampLeft = 0;
     float _muteGain = 1.f, _bypassMix = 0.f;
+    float _tonePhase = 0.f, _toneMix = 0.f, _toneAmpL = 0.f, _toneAmpR = 0.f;
 
     std::atomic<bool> _muted{false}, _bypass{false};
     std::atomic<int> _session{int(SessionStatus::Stopped)};

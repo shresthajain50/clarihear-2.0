@@ -10,7 +10,7 @@
 //  secure backend needs a device build (OPEN_QUESTIONS Q8).
 // ============================================================
 
-import React, {useCallback, useReducer} from 'react';
+import React, {useCallback, useReducer, useState} from 'react';
 import {Alert, Linking, PermissionsAndroid, Platform, StatusBar, StyleSheet, Text, View} from 'react-native';
 import {Colors} from './theme';
 import {appFlow, initialFlow} from './app/appFlow';
@@ -20,6 +20,7 @@ import type {Audiogram} from './native/types';
 import OnboardingScreen from './screens/OnboardingScreen';
 import SafetyScreen from './screens/SafetyScreen';
 import PermissionScreen from './screens/PermissionScreen';
+import DeviceCheckScreen from './screens/DeviceCheckScreen';
 import AudiogramScreen from './screens/AudiogramScreen';
 import ReferralScreen from './screens/ReferralScreen';
 import ListeningScreen from './screens/ListeningScreen';
@@ -51,9 +52,10 @@ async function requestMicPermission(): Promise<boolean> {
 
 export default function App() {
   const [flow, dispatch] = useReducer(appFlow, initialFlow({devModeAvailable: __DEV__}));
+  const [micGranted, setMicGranted] = useState(false);
 
   const onPermission = useCallback(async () => {
-    if (await requestMicPermission()) dispatch({type: 'DEVICE_READY'});
+    if (await requestMicPermission()) setMicGranted(true);
     else micNeeded();
   }, []);
 
@@ -79,6 +81,7 @@ export default function App() {
       case 'safety_check':
         return <SafetyScreen onResult={result => dispatch({type: 'SAFETY_RESULT', result})} />;
       case 'device_check':
+        if (micGranted) return <DeviceCheckScreen onDone={() => dispatch({type: 'DEVICE_READY'})} />;
         return (
           <PermissionScreen
             onGranted={onPermission}

@@ -99,3 +99,19 @@ on the phone speaker** (mic → gain → speaker: feedback howl). Now:
       that a second start works.
 - [ ] Kotlin: `AudioModule.installFromContext` registers the headset monitor once.
       A USB-C DAC and a BLE headset (API 31+) count as headsets.
+
+## Headphone check: test tones + ambient capture (#21)
+
+Headless: engine tone tests (one ear only, exact level, mic cut, ramped ear
+switch, level clamped ≤ −20 dBFS, mute wins, all mutation-checked), the JSI
+syntax check, and the jest screen flow. Not run: real tones through real headphones.
+
+- [ ] The left tone is heard **only** in the left ear, then the right tone only in the right.
+      Also try with earbuds deliberately swapped: the app reports "swapped".
+- [ ] With iOS/Android mono audio (accessibility setting) on, the check reports that
+      sound reaches both ears.
+- [ ] The tone level is comfortable at typical volume (−30 dBFS peak, capped at −20 dBFS).
+- [ ] While the room is being measured you hear nothing (output muted).
+- [ ] In a quiet room the check passes. With a TV or fan on it reports "a little noisy".
+      Note the dBFS level shown in developer mode, per device, for OPEN_QUESTIONS Q10.
+- [ ] Leaving the check halfway stops the tone and audio.

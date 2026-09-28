@@ -78,6 +78,11 @@ export function getSessionStatus(): SessionStatus {
   return jsi ? jsi.getSessionStatus() : 'stopped';
 }
 
+/** Headphone check tone on ONE ear (PRD §11); `null` turns it off. Mic path is cut while on. */
+export function setTestTone(ear: 'left' | 'right' | null, freqHz = 1000, levelDbfs = -30): void {
+  jsi?.setTestTone(ear === 'left' ? 0 : ear === 'right' ? 1 : -1, freqHz, levelDbfs);
+}
+
 export function getInputLevel(): number {
   return jsi ? jsi.getInputLevel() : -96;
 }

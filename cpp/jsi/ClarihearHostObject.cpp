@@ -59,6 +59,7 @@ ClarihearHostObject::getPropertyNames(RT& rt) {
         "setMuted",
         "getLimiterEngagedCount",
         "getSessionStatus",
+        "setTestTone",
         "getInputLevel",
         "getOutputLevel",
     };
@@ -256,6 +257,22 @@ Val ClarihearHostObject::get(RT& rt, const Prop& name) {
                                                      "paused_interrupted", "no_headphones"};
                 const int s = int(_engine->sessionStatus());
                 return String::createFromAscii(rt, (s >= 0 && s < 5) ? kNames[s] : "stopped");
+            });
+    }
+
+    // ── setTestTone(channel: -1|0|1, freqHz, levelDbfs) → void ────────
+    // Headphone L/R check tone. The engine clamps level (≤ kMaxToneDbfs) and frequency.
+    if (nameStr == "setTestTone") {
+        return makeFunction(rt, "setTestTone", 3,
+            [this](RT&, const Val&, const Val* args, size_t count) -> Val {
+                if (count < 3 || !args[0].isNumber() || !args[1].isNumber() || !args[2].isNumber()) {
+                    _engine->setTestTone(-1, 0.f, -100.f);  // malformed → tone off
+                    return Val::undefined();
+                }
+                _engine->setTestTone(static_cast<int>(args[0].asNumber()),
+                                     static_cast<float>(args[1].asNumber()),
+                                     static_cast<float>(args[2].asNumber()));
+                return Val::undefined();
             });
     }
 

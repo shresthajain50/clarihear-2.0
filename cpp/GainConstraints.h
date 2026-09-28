@@ -24,6 +24,7 @@ constexpr float kMaxTotalGainDb     =  20.f;  ///< max small-signal gain of the 
 constexpr float kMaxMakeupGainDb    =   6.f;  ///< compressor makeup ceiling (counts toward kMaxTotalGainDb)
 constexpr float kLimiterCeilingDbfs =  -1.f;  ///< Level 1 output peak ceiling
 constexpr float kLimiterCeilingLin  = 0.891250938f;  ///< 10^(-1/20)
+constexpr float kMaxToneDbfs        = -20.f;  ///< test-tone peak ceiling (L/R check), well below full scale
 
 /// NaN/Inf check that survives -ffast-math (Android builds with it,
 /// which lets the compiler assume std::isfinite() is always true).

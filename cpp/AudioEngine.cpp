@@ -84,6 +84,14 @@ void AudioEngine::publishLocked() noexcept {
     RtParams rt;
     rt.comp = clampCompressor(_comp);
     rt.volume = _volumeReq;
+    const bool toneOk = (_toneChannelReq == 0 || _toneChannelReq == 1) &&
+                        limits::isFiniteBits(_toneFreqReq) && limits::isFiniteBits(_toneDbfsReq);
+    if (toneOk) {
+        const float f = std::min(8000.f, std::max(125.f, _toneFreqReq));
+        rt.toneChannel = _toneChannelReq;
+        rt.tonePhaseInc = 2.f * float(M_PI) * f / kSampleRate;
+        rt.toneAmp = std::pow(10.f, std::min(limits::kMaxToneDbfs, _toneDbfsReq) / 20.f);
+    }
     float gl[kEqBands], gr[kEqBands];
     std::copy(_gainL, _gainL + kEqBands, gl);
     std::copy(_gainR, _gainR + kEqBands, gr);
@@ -122,6 +130,14 @@ void AudioEngine::setEqBandGain(int band, float leftDb, float rightDb) noexcept 
 void AudioEngine::setCompressorParams(const CompressorParams& params) noexcept {
     std::lock_guard<std::mutex> lock(_writeMutex);
     _comp = params;  // clamped in publishLocked
+    publishLocked();
+}
+
+void AudioEngine::setTestTone(int channel, float freqHz, float levelDbfs) noexcept {
+    std::lock_guard<std::mutex> lock(_writeMutex);
+    _toneChannelReq = channel;
+    _toneFreqReq = freqHz;
+    _toneDbfsReq = levelDbfs;
     publishLocked();
 }
 
@@ -185,8 +201,23 @@ void AudioEngine::process(const float* input, float* output, int numFrames) noex
         _bypassMix = approach(_bypassMix, bypassTarget, 1.f / kBypassRampSamples);
         _muteGain  = approach(_muteGain, muteTarget, 1.f / kMuteRampSamples);
         // At mix == 1 this is exactly inL (wet * 0 == 0), so bypass is bit-exact.
-        float outL = (inL * _bypassMix + wetL * (1.f - _bypassMix)) * _muteGain;
-        float outR = (inR * _bypassMix + wetR * (1.f - _bypassMix)) * _muteGain;
+        float outL = inL * _bypassMix + wetL * (1.f - _bypassMix);
+        float outR = inR * _bypassMix + wetR * (1.f - _bypassMix);
+
+        // Test tone (L/R check): crossfade the mic out, ramp each ear's tone amplitude.
+        const int ch = _rt.toneChannel;
+        _toneMix  = approach(_toneMix, ch >= 0 ? 1.f : 0.f, 1.f / kParamRampSamples);
+        _toneAmpL = approach(_toneAmpL, ch == 0 ? _rt.toneAmp : 0.f, _rt.toneAmp / kParamRampSamples + 1e-6f);
+        _toneAmpR = approach(_toneAmpR, ch == 1 ? _rt.toneAmp : 0.f, _rt.toneAmp / kParamRampSamples + 1e-6f);
+        if (_toneMix > 0.f || _toneAmpL > 0.f || _toneAmpR > 0.f) {
+            const float s = std::sin(_tonePhase);
+            _tonePhase += _rt.tonePhaseInc;
+            if (_tonePhase > 2.f * float(M_PI)) _tonePhase -= 2.f * float(M_PI);
+            outL = outL * (1.f - _toneMix) + _toneAmpL * s;
+            outR = outR * (1.f - _toneMix) + _toneAmpR * s;
+        }
+        outL *= _muteGain;
+        outR *= _muteGain;
         if (_limiter.process(outL, outR)) ++limited;
 
         output[2 * i]     = outL;
