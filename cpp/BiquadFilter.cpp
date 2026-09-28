@@ -19,12 +19,6 @@
 
 namespace clarihear {
 
-// ── Internal helper: prevent NaN / denormals ────────────────
-static constexpr float kDenormalFloor = 1e-15f;
-static inline float sanitize(float x) noexcept {
-    return (x > kDenormalFloor || x < -kDenormalFloor) ? x : 0.f;
-}
-
 // ============================================================
 //  makeBiquadCoeffs
 //  All formulas directly from the EQ Cookbook.

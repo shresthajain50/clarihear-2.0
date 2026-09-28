@@ -59,8 +59,9 @@ public:
     void setCoeffs(const BiquadCoeffs& c) noexcept { _current = c; _rampLeft = 0; }
 
     /// Glide linearly to `t` over `samples` samples so gain changes don't click.
-    /// Stable by construction: the 2nd-order stability region in (a1, a2) is a
-    /// convex triangle, so every point between two stable filters is stable.
+    /// Every intermediate coefficient set has its poles inside the unit circle (the
+    /// 2nd-order stability region in (a1, a2) is a convex triangle). That is frozen-filter
+    /// stability only; the Level-2 bound during the glide is covered empirically by tests.
     void rampTo(const BiquadCoeffs& t, int samples) noexcept {
         if (samples <= 0) { setCoeffs(t); return; }
         const float k = 1.f / float(samples);

@@ -97,9 +97,11 @@ float Compressor::computeGainDb(float inputDb) const noexcept {
 
     if (kneeDbl > 0.f && overshoot > -halfKnee && overshoot < halfKnee) {
         // ── Soft knee zone ──────────────────────────────────────────────
-        // Quadratic blend between 1:1 and ratio:1
+        // Quadratic blend between 1:1 and ratio:1. The coefficient is (1/R - 1) ≤ 0, so the
+        // knee only ever reduces gain and meets the compressed branch at overshoot = +halfKnee.
+        // (It was (R - 1): a boost of up to (R-1)·knee/2 dB that bypassed the Level-2 ceiling.)
         const float x = overshoot + halfKnee;
-        gainReductionDb = (ratio - 1.f) * x * x / (2.f * kneeDbl);
+        gainReductionDb = (1.f / ratio - 1.f) * x * x / (2.f * kneeDbl);
     } else if (overshoot >= halfKnee) {
         // ── Above threshold (compressed zone) ───────────────────────────
         // Standard compressor formula: output = threshold + overshoot/ratio

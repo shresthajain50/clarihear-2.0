@@ -121,6 +121,33 @@ void test_compressor_above_threshold() {
     EXPECT_NEAR(gainDb, -18.f, 3.f, "Compressor: above threshold → gain reduction");
 }
 
+void test_compressor_static_curve() {
+    // Steady tones from -70 to 0 dBFS (0.5 dB steps), default ratio 2 / knee 6 dB and the
+    // clamp maxima ratio 3 / knee 12 dB: a compressor may only ever REDUCE gain (makeup 0),
+    // and output level must never fall as input rises (no knee discontinuity).
+    for (float ratio : {2.f, 3.f}) {
+        const float knee = ratio == 2.f ? 6.f : 12.f;
+        float worstBoost = -100.f, prevOut = -1e9f, worstDrop = 0.f;
+        for (float inDb = -70.f; inDb <= 0.f; inDb += 0.5f) {
+            Compressor comp(48000.f);
+            CompressorParams p;
+            p.thresholdDb = -40.f; p.ratio = ratio; p.kneeDb = knee; p.makeupGainDb = 0.f;
+            comp.setParams(p);
+            auto s = makeSine(1000.f, 24000, std::pow(10.f, inDb / 20.f));
+            std::vector<float> out(s.size());
+            for (size_t i = 0; i < s.size(); ++i) out[i] = comp.process(s[i]);
+            const float outDb = 20.f * std::log10(rms(std::vector<float>(out.end() - 4800, out.end())) /
+                                                  rms(std::vector<float>(s.end() - 4800, s.end()))) + inDb;
+            worstBoost = std::fmax(worstBoost, outDb - inDb);
+            worstDrop = std::fmin(worstDrop, outDb - prevOut);
+            prevOut = outDb;
+        }
+        printf("       ratio %.0f knee %.0f: max gain %.2f dB, worst output step %.2f dB\n", ratio, knee, worstBoost, worstDrop);
+        EXPECT_TRUE(worstBoost <= 0.1f, "Compressor: never boosts (soft knee included)");
+        EXPECT_TRUE(worstDrop >= -0.1f, "Compressor: output level monotonic in input level (continuous knee)");
+    }
+}
+
 // ── main ──────────────────────────────────────────────────────
 int main() {
     printf("=== ClariHear DSP Unit Tests ===\n\n");
@@ -130,6 +157,7 @@ int main() {
     test_biquad_golden_noise();
     test_compressor_below_threshold();
     test_compressor_above_threshold();
+    test_compressor_static_curve();
 
     printf("\n%d passed, %d failed.\n", gPassed, gFailed);
     return gFailed > 0 ? 1 : 0;

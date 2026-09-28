@@ -113,7 +113,11 @@ void test_level2_total_gain() {
     float worst = -100.f;
     for (float f : {150.f, 250.f, 354.f, 500.f, 707.f, 1000.f, 1414.f, 2000.f, 2828.f, 4000.f, 5657.f, 8000.f, 11000.f})
         worst = std::fmax(worst, gainDbAt(e, f));
-    printf("       worst-case small-signal gain = %.2f dB\n", worst);
+    // Also sweep input LEVEL: the WDRC knee (≈ -43..-37 dBFS after EQ) must not add gain on top.
+    for (float inDb = -70.f; inDb <= -10.f; inDb += 2.f)
+        for (float f : {1000.f, 1414.f, 4000.f})
+            worst = std::fmax(worst, gainDbAt(e, f, std::pow(10.f, inDb / 20.f)));
+    printf("       worst-case gain over frequency × level = %.2f dB\n", worst);
     EXPECT_TRUE(worst <= limits::kMaxTotalGainDb + 0.5f, "Engine: Level-2 combined EQ gain ≤ ceiling at every frequency");
     EXPECT_TRUE(worst >= limits::kMaxTotalGainDb - 3.f, "Engine: Level-2 scaling doesn't collapse gain far below the ceiling");
 }
